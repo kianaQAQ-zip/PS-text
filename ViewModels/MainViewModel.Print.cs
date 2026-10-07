@@ -210,6 +210,10 @@ namespace PSText.ViewModels
                 return;
             }
 
+            // 打印的是"看得见的画面"，因此要把标注烘进像素。
+            // 这里用副本而不是就地合并 —— 打印不该把用户的标注层吃掉。
+            ImageDocument document = WithAnnotationsBaked(_document);
+
             try
             {
                 PrintRequest request = _printService.ShowPrintDialog(_document.FileName);
@@ -232,8 +236,8 @@ namespace PSText.ViewModels
                     return;
                 }
 
-                _printService.Print(request, _document.Bitmap, _document.DpiX, _document.DpiY, layout);
-                StatusMessage = string.Format("已发送到打印机：{0}", _document.FileName);
+                _printService.Print(request, document.Bitmap, document.DpiX, document.DpiY, layout);
+                StatusMessage = string.Format("已发送到打印机：{0}", document.FileName);
             }
             catch (Exception ex)
             {
@@ -261,7 +265,8 @@ namespace PSText.ViewModels
                     return;
                 }
 
-                ImageDocument document = _document;
+                // 预览里要能看到标注，因此同样用"烘进标注的副本"
+                ImageDocument document = WithAnnotationsBaked(_document);
 
                 PrintPreviewViewModel previewViewModel = new PrintPreviewViewModel(
                     document.Bitmap,

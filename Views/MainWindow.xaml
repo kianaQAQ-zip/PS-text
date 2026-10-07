@@ -367,6 +367,57 @@
                        IsHitTestVisible="False"
                        Visibility="{Binding IsBrushCursorVisible, Converter={StaticResource BoolToVisibility}}" />
             </Canvas>
+
+            <!-- ==================== 标注叠加层 ====================
+                 标注是**对象**而不是画进像素的东西，所以平时就画在这一层上：
+                 选中改参数时只需重绘这一个对象，底图完全不用动。
+                 几何来自 AnnotationVisualBuilder —— 与"合并到画面"用的是同一份，保证所见即所得。 -->
+            <Canvas x:Name="AnnotationOverlay"
+                    Width="{Binding ImagePixelWidth}"
+                    Height="{Binding ImagePixelHeight}"
+                    HorizontalAlignment="Center"
+                    VerticalAlignment="Center"
+                    Background="Transparent"
+                    Cursor="Cross"
+                    MouseLeftButtonDown="OnAnnotationMouseDown"
+                    MouseMove="OnAnnotationMouseMove"
+                    MouseLeftButtonUp="OnAnnotationMouseUp"
+                    Visibility="{Binding IsAnnotationMode, Converter={StaticResource BoolToVisibility}}">
+              <Canvas.RenderTransform>
+                <ScaleTransform ScaleX="{Binding ZoomFactor}" ScaleY="{Binding ZoomFactor}"
+                                CenterX="0" CenterY="0" />
+              </Canvas.RenderTransform>
+
+              <ItemsControl ItemsSource="{Binding Annotations}" IsHitTestVisible="False">
+                <ItemsControl.ItemsPanel>
+                  <ItemsPanelTemplate>
+                    <Canvas />
+                  </ItemsPanelTemplate>
+                </ItemsControl.ItemsPanel>
+                <ItemsControl.ItemTemplate>
+                  <DataTemplate>
+                    <Canvas>
+                      <Path Data="{Binding Geometry}"
+                            Fill="{Binding FillBrush}"
+                            Stroke="{Binding StrokeBrush}"
+                            StrokeThickness="{Binding StrokeThickness}" />
+                      <Path Data="{Binding LabelGeometry}" Fill="{Binding LabelBrush}" />
+                    </Canvas>
+                  </DataTemplate>
+                </ItemsControl.ItemTemplate>
+              </ItemsControl>
+
+              <!-- 选中框 -->
+              <Rectangle Canvas.Left="{Binding AnnotationSelectionLeft}"
+                         Canvas.Top="{Binding AnnotationSelectionTop}"
+                         Width="{Binding AnnotationSelectionWidth}"
+                         Height="{Binding AnnotationSelectionHeight}"
+                         Stroke="{DynamicResource AccentBrush}"
+                         StrokeThickness="1"
+                         StrokeDashArray="4 3"
+                         IsHitTestVisible="False"
+                         Visibility="{Binding HasSelectedAnnotation, Converter={StaticResource BoolToVisibility}}" />
+            </Canvas>
           </Grid>
         </ScrollViewer>
       </Grid>
@@ -913,6 +964,102 @@
                 <TextBlock Text="仿制图章：进入模式 → 按住 Alt 点一下取源 → 在别处拖拽涂抹" Margin="0,4,0,0" FontSize="11" TextWrapping="Wrap"
                            Foreground="{DynamicResource SubtleForegroundBrush}" />
                 <TextBlock Text="都可以 Ctrl+Z 撤销；每笔涂抹只保存改动区域的前后像素，内存占用很小" Margin="0,8,0,0" FontSize="11" TextWrapping="Wrap"
+                           Foreground="{DynamicResource SubtleForegroundBrush}" />
+              </StackPanel>
+            </ScrollViewer>
+          </TabItem>
+
+          <!-- ==================== 标注 ==================== -->
+          <TabItem Header="标注">
+            <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+              <StackPanel Margin="14,12">
+
+                <TextBlock Text="标注（非破坏性）" FontSize="14" FontWeight="SemiBold"
+                           Foreground="{DynamicResource ChromeForegroundBrush}" />
+                <TextBlock Margin="0,6,0,0" FontSize="11" TextWrapping="Wrap"
+                           Foreground="{DynamicResource SubtleForegroundBrush}"
+                           Text="标注以对象形式叠在画面上，随时可以选中改颜色 / 挪位置 / 删除，底图像素不动。导出或打印时才会合并进像素；执行滤镜、裁剪等破坏性操作前会自动先合并。" />
+
+                <TextBlock Text="类型" Margin="0,12,0,0" Style="{StaticResource StatusLabelStyle}" />
+                <ComboBox SelectedIndex="{Binding AnnotationToolIndex, Mode=TwoWay}"
+                          IsEnabled="{Binding HasDocument}">
+                  <ComboBoxItem Content="箭头" />
+                  <ComboBoxItem Content="矩形" />
+                  <ComboBoxItem Content="椭圆" />
+                  <ComboBoxItem Content="序号（自动编号）" />
+                  <ComboBoxItem Content="高亮" />
+                  <ComboBoxItem Content="文字" />
+                </ComboBox>
+
+                <StackPanel Orientation="Horizontal" Margin="0,12,0,0">
+                  <Button Content="进入标注模式" Style="{StaticResource ToolbarButtonStyle}"
+                          Command="{Binding BeginAnnotationCommand}" />
+                  <Button Content="退出" Style="{StaticResource ToolbarButtonStyle}"
+                          Command="{Binding ExitAnnotationCommand}" />
+                </StackPanel>
+
+                <TextBlock Text="颜色" Margin="0,12,0,0" Style="{StaticResource StatusLabelStyle}" />
+                <WrapPanel Margin="0,4,0,0">
+                  <Button Content="红色" Style="{StaticResource ToolbarButtonStyle}" Click="OnAnnotationColorRed" />
+                  <Button Content="黄色" Style="{StaticResource ToolbarButtonStyle}" Click="OnAnnotationColorYellow" />
+                  <Button Content="绿色" Style="{StaticResource ToolbarButtonStyle}" Click="OnAnnotationColorGreen" />
+                  <Button Content="蓝色" Style="{StaticResource ToolbarButtonStyle}" Click="OnAnnotationColorBlue" />
+                  <Button Content="白色" Style="{StaticResource ToolbarButtonStyle}" Click="OnAnnotationColorWhite" />
+                  <Button Content="黑色" Style="{StaticResource ToolbarButtonStyle}" Click="OnAnnotationColorBlack" />
+                </WrapPanel>
+                <Rectangle Height="20" Margin="0,6,0,0" RadiusX="3" RadiusY="3"
+                           Fill="{Binding AnnotationColorBrush}"
+                           Stroke="{DynamicResource BorderBrush}" />
+
+                <DockPanel Margin="0,10,0,0" LastChildFill="False">
+                  <TextBlock DockPanel.Dock="Left" Text="线宽" Style="{StaticResource StatusLabelStyle}" Margin="0" />
+                  <TextBlock DockPanel.Dock="Right" MinWidth="46" TextAlignment="Right"
+                             Style="{StaticResource StatusTextStyle}" Margin="0"
+                             Text="{Binding AnnotationStrokeWidth, StringFormat={}{0:0} px}" />
+                </DockPanel>
+                <Slider Minimum="1" Maximum="24" TickFrequency="2" SmallChange="1" LargeChange="2"
+                        IsEnabled="{Binding HasDocument}"
+                        Value="{Binding AnnotationStrokeWidth, Mode=TwoWay}" />
+
+                <DockPanel Margin="0,10,0,0" LastChildFill="False">
+                  <TextBlock DockPanel.Dock="Left" Text="字号（文字 / 序号）" Style="{StaticResource StatusLabelStyle}" Margin="0" />
+                  <TextBlock DockPanel.Dock="Right" MinWidth="46" TextAlignment="Right"
+                             Style="{StaticResource StatusTextStyle}" Margin="0"
+                             Text="{Binding AnnotationFontSize, StringFormat={}{0:0} px}" />
+                </DockPanel>
+                <Slider Minimum="8" Maximum="120" TickFrequency="8" SmallChange="2" LargeChange="8"
+                        IsEnabled="{Binding HasDocument}"
+                        Value="{Binding AnnotationFontSize, Mode=TwoWay}" />
+
+                <TextBlock Text="文字内容" Margin="0,10,0,0" Style="{StaticResource StatusLabelStyle}" />
+                <TextBox Text="{Binding AnnotationText, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                         IsEnabled="{Binding HasDocument}" />
+
+                <TextBlock Text="{Binding SelectedAnnotationInfoText}" Margin="0,12,0,0" FontSize="11" TextWrapping="Wrap"
+                           Foreground="{DynamicResource SubtleForegroundBrush}" />
+
+                <StackPanel Orientation="Horizontal" Margin="0,10,0,0">
+                  <Button Content="删除选中" Style="{StaticResource ToolbarButtonStyle}"
+                          Command="{Binding DeleteSelectedAnnotationCommand}" />
+                  <Button Content="清空全部" Style="{StaticResource ToolbarButtonStyle}"
+                          Command="{Binding ClearAnnotationsCommand}" />
+                </StackPanel>
+
+                <Button Content="合并到画面" Style="{StaticResource ToolbarButtonStyle}"
+                        Margin="0,10,0,0" HorizontalAlignment="Left"
+                        Command="{Binding FlattenAnnotationsCommand}" />
+
+                <Rectangle Height="1" Margin="0,16" Fill="{DynamicResource BorderBrush}" />
+
+                <TextBlock Text="操作" FontSize="14" FontWeight="SemiBold"
+                           Foreground="{DynamicResource ChromeForegroundBrush}" />
+                <TextBlock Text="1. 点「进入标注模式」，选择类型" Margin="0,8,0,0" FontSize="11" TextWrapping="Wrap"
+                           Foreground="{DynamicResource SubtleForegroundBrush}" />
+                <TextBlock Text="2. 在画布上拖拽绘制；序号 / 文字点一下即可落点" Margin="0,4,0,0" FontSize="11" TextWrapping="Wrap"
+                           Foreground="{DynamicResource SubtleForegroundBrush}" />
+                <TextBlock Text="3. 点击已有标注即可选中，改颜色 / 线宽 / 字号会立即生效，拖动可挪位" Margin="0,4,0,0" FontSize="11" TextWrapping="Wrap"
+                           Foreground="{DynamicResource SubtleForegroundBrush}" />
+                <TextBlock Text="每一步都可 Ctrl+Z 撤销（历史里存的是对象列表快照，非常省内存）" Margin="0,8,0,0" FontSize="11" TextWrapping="Wrap"
                            Foreground="{DynamicResource SubtleForegroundBrush}" />
               </StackPanel>
             </ScrollViewer>

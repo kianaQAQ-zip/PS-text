@@ -532,6 +532,10 @@ namespace PSText.ViewModels
                     return;
                 }
 
+                // 标注是叠加层：破坏性操作（滤镜 / 裁剪 / 缩放 / 旋转 / 文字）之前必须先烘进像素，
+                // 否则操作之后所有标注的坐标都会错位。
+                FlattenAnnotations("合并标注（" + label + " 前）");
+
                 EditState before = CreateCurrentStateSnapshot();
                 PixelBuffer source = PixelBuffer.FromBitmap(_document.Bitmap);
                 StatusMessage = "正在处理：" + label;

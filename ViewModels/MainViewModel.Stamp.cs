@@ -385,6 +385,9 @@ namespace PSText.ViewModels
                 return;
             }
 
+            // 涂抹同样是破坏性操作：先把标注烘进像素，避免涂完之后标注全部错位
+            FlattenAnnotations("合并标注（涂抹前）");
+
             IsBusy = true;
 
             try

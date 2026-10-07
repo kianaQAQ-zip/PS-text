@@ -449,8 +449,8 @@ namespace PSText.Views
                 return;
             }
 
-            // 修补模式下双击是在框选标记，不应该顺带切换缩放
-            if (viewModel.IsRetouchMode)
+            // 修补 / 标注模式下双击是在框选或绘制，不应该顺带切换缩放
+            if (viewModel.IsRetouchMode || viewModel.IsAnnotationMode)
             {
                 return;
             }
@@ -752,6 +752,139 @@ namespace PSText.Views
             if (viewModel != null)
             {
                 viewModel.HideRetouchCursor();
+            }
+        }
+
+        #endregion
+
+        #region 标注交互
+
+        /// <summary>把鼠标位置换算成图像像素坐标（标注层与图像 1:1，随 ZoomFactor 缩放）。</summary>
+        private bool TryGetAnnotationImagePoint(MouseEventArgs e, out double imageX, out double imageY)
+        {
+            imageX = 0.0;
+            imageY = 0.0;
+
+            MainViewModel viewModel = ViewModel;
+            if (viewModel == null || AnnotationOverlay == null)
+            {
+                return false;
+            }
+
+            double zoom = viewModel.ZoomFactor;
+            if (zoom <= 0.0)
+            {
+                return false;
+            }
+
+            Point position = e.GetPosition(AnnotationOverlay);
+            imageX = position.X / zoom;
+            imageY = position.Y / zoom;
+            return true;
+        }
+
+        private void OnAnnotationMouseDown(object sender, MouseButtonEventArgs e)
+        {
+            MainViewModel viewModel = ViewModel;
+            if (viewModel == null || !viewModel.IsAnnotationMode)
+            {
+                return;
+            }
+
+            double imageX;
+            double imageY;
+
+            if (!TryGetAnnotationImagePoint(e, out imageX, out imageY))
+            {
+                return;
+            }
+
+            viewModel.BeginAnnotationGesture(imageX, imageY);
+            AnnotationOverlay.CaptureMouse();
+            e.Handled = true;
+        }
+
+        private void OnAnnotationMouseMove(object sender, MouseEventArgs e)
+        {
+            MainViewModel viewModel = ViewModel;
+            if (viewModel == null || !viewModel.IsAnnotationMode)
+            {
+                return;
+            }
+
+            if (e.LeftButton != MouseButtonState.Pressed)
+            {
+                return;
+            }
+
+            double imageX;
+            double imageY;
+
+            if (!TryGetAnnotationImagePoint(e, out imageX, out imageY))
+            {
+                return;
+            }
+
+            viewModel.UpdateAnnotationGesture(imageX, imageY);
+            e.Handled = true;
+        }
+
+        private void OnAnnotationMouseUp(object sender, MouseButtonEventArgs e)
+        {
+            MainViewModel viewModel = ViewModel;
+
+            if (viewModel != null)
+            {
+                viewModel.EndAnnotationGesture();
+            }
+
+            if (AnnotationOverlay != null && Mouse.Captured == AnnotationOverlay)
+            {
+                AnnotationOverlay.ReleaseMouseCapture();
+            }
+        }
+
+        private void OnAnnotationColorRed(object sender, RoutedEventArgs e)
+        {
+            SetAnnotationColor(Color.FromRgb(0xE2, 0x4B, 0x4A));
+        }
+
+        private void OnAnnotationColorYellow(object sender, RoutedEventArgs e)
+        {
+            SetAnnotationColor(Color.FromRgb(0xEF, 0x9F, 0x27));
+        }
+
+        private void OnAnnotationColorGreen(object sender, RoutedEventArgs e)
+        {
+            SetAnnotationColor(Color.FromRgb(0x1D, 0x9E, 0x75));
+        }
+
+        private void OnAnnotationColorBlue(object sender, RoutedEventArgs e)
+        {
+            SetAnnotationColor(Color.FromRgb(0x37, 0x8A, 0xDD));
+        }
+
+        private void OnAnnotationColorWhite(object sender, RoutedEventArgs e)
+        {
+            SetAnnotationColor(Colors.White);
+        }
+
+        private void OnAnnotationColorBlack(object sender, RoutedEventArgs e)
+        {
+            SetAnnotationColor(Colors.Black);
+        }
+
+        /// <summary>
+        /// 设置标注颜色。若当前有选中的标注，ViewModel 会立刻把新颜色应用上去
+        /// （这正是“选中再改参数”的用法）。
+        /// </summary>
+        private void SetAnnotationColor(Color color)
+        {
+            MainViewModel viewModel = ViewModel;
+
+            if (viewModel != null)
+            {
+                viewModel.AnnotationColor = color;
             }
         }
 

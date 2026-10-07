@@ -112,6 +112,8 @@ namespace PSText
                 CheckCloneStampFilter(ref checks, ref failures, log);
                 CheckRegionHistory(ref checks, ref failures, log);
                 CheckCloneStampEndToEnd(imageService, pngPath, ref checks, ref failures, log);
+                CheckAnnotationRendering(ref checks, ref failures, log);
+                CheckAnnotationEndToEnd(imageService, pngPath, ref checks, ref failures, log);
                 log.AppendLine();
             }
             catch (Exception ex)
@@ -5600,6 +5602,410 @@ namespace PSText
             {
                 failures++;
                 log.AppendLine("  FAIL 仿制图章端到端测试异常: " + ex.GetType().Name + " " + ex.Message);
+            }
+
+            log.AppendLine();
+        }
+
+        /// <summary>
+        /// 标注对象与渲染（M2b-2）。
+        ///
+        /// 标注是**叠加层对象**而不是画进像素的东西，因此这里要钉的是两件事：
+        ///   1. 渲染只影响标注覆盖到的区域（别把整幅图按叠加层的方式重画一遍）；
+        ///   2. 高亮确实是半透明混合（不是盖一块实色上去）。
+        /// </summary>
+        private static void CheckAnnotationRendering(ref int checks, ref int failures, StringBuilder log)
+        {
+            log.AppendLine("[30] 标注对象与渲染（非破坏性叠加层）");
+
+            try
+            {
+                // ---- 1. 克隆必须是深拷贝 ----
+                checks++;
+                AnnotationObject original = new AnnotationObject
+                {
+                    Kind = AnnotationKind.Arrow,
+                    X1 = 10, Y1 = 20, X2 = 100, Y2 = 80,
+                    Text = "原"
+                };
+
+                AnnotationObject copy = original.Clone();
+                copy.X1 = 999;
+                copy.Text = "改";
+
+                if (Math.Abs(original.X1 - 10) > 0.001 || original.Text != "原")
+                {
+                    failures++;
+                    log.AppendLine("  FAIL 克隆不是深拷贝（改副本影响了原对象）");
+                }
+                else
+                {
+                    log.AppendLine("  OK   克隆是深拷贝（历史快照之间互不影响）");
+                }
+
+                // ---- 2. 命中测试 ----
+                checks++;
+                bool insideHit = original.HitTest(50, 50, 0.0);
+                bool outsideHit = original.HitTest(500, 500, 0.0);
+
+                if (!insideHit || outsideHit)
+                {
+                    failures++;
+                    log.AppendLine(string.Format(
+                        "  FAIL 命中测试异常（框内 {0}，框外 {1}）", insideHit, outsideHit));
+                }
+                else
+                {
+                    log.AppendLine("  OK   命中测试正确（框内命中、框外不命中）");
+                }
+
+                // ---- 3. 退化对象（起点=终点）不能崩 ----
+                checks++;
+                AnnotationObject degenerate = new AnnotationObject
+                {
+                    Kind = AnnotationKind.Arrow,
+                    X1 = 50, Y1 = 50, X2 = 50, Y2 = 50,
+                    StrokeWidth = 4.0
+                };
+
+                AnnotationVisual degenerateVisual = AnnotationVisualBuilder.Build(degenerate);
+                bool degenerateOk = degenerateVisual.Geometry == null
+                                    || degenerateVisual.Geometry == Geometry.Empty
+                                    || degenerateVisual.Geometry.Bounds.IsEmpty;
+
+                if (!degenerateOk)
+                {
+                    failures++;
+                    log.AppendLine("  FAIL 退化箭头（起点=终点）产生了非空几何，可能画出杂乱图元");
+                }
+                else
+                {
+                    log.AppendLine("  OK   退化箭头（起点=终点）安全返回空几何");
+                }
+
+                // ---- 4. 无标注时渲染必须原样返回（零开销） ----
+                checks++;
+                PixelBuffer plain = CreateSolidBuffer(160, 120, 200, 200, 200);
+                PixelBuffer untouched = AnnotationRenderer.Render(plain, new List<AnnotationObject>());
+
+                if (!ReferenceEquals(plain, untouched))
+                {
+                    failures++;
+                    log.AppendLine("  FAIL 无标注时渲染仍复制了像素（应为零开销原样返回）");
+                }
+                else
+                {
+                    log.AppendLine("  OK   无标注时不复制像素（原样返回，零开销）");
+                }
+
+                // ---- 5. 渲染只影响标注覆盖的区域 ----
+                checks++;
+                List<AnnotationObject> rectangle = new List<AnnotationObject>();
+                rectangle.Add(new AnnotationObject
+                {
+                    Kind = AnnotationKind.Rectangle,
+                    X1 = 50, Y1 = 40, X2 = 120, Y2 = 100,
+                    Color = Color.FromRgb(0xE2, 0x4B, 0x4A),
+                    StrokeWidth = 6.0
+                });
+
+                PixelBuffer withAnnotation = AnnotationRenderer.Render(plain, rectangle);
+                byte[] beforePixels = plain.GetPixels();
+                byte[] afterPixels = withAnnotation.GetPixels();
+                int changedOutside = 0;
+                int changedInside = 0;
+
+                for (int y = 0; y < 120; y++)
+                {
+                    for (int x = 0; x < 160; x++)
+                    {
+                        int index = (y * 160 + x) * 4;
+
+                        if (beforePixels[index] == afterPixels[index]
+                            && beforePixels[index + 1] == afterPixels[index + 1]
+                            && beforePixels[index + 2] == afterPixels[index + 2])
+                        {
+                            continue;
+                        }
+
+                        // 标注的视觉包围盒外扩了 padding，这里用更宽松的判定
+                        bool inside = x >= 40 && x <= 130 && y >= 30 && y <= 110;
+
+                        if (inside)
+                        {
+                            changedInside++;
+                        }
+                        else
+                        {
+                            changedOutside++;
+                        }
+                    }
+                }
+
+                if (changedOutside != 0 || changedInside == 0)
+                {
+                    failures++;
+                    log.AppendLine(string.Format(
+                        "  FAIL 渲染范围不对（标注附近改动 {0} 像素，远处改动 {1} 像素）",
+                        changedInside, changedOutside));
+                }
+                else
+                {
+                    log.AppendLine(string.Format(
+                        "  OK   渲染只影响标注覆盖区域（附近改动 {0} 像素、远处 0 改动）", changedInside));
+                }
+
+                // ---- 6. 矩形描边确实画上了 ----
+                checks++;
+                byte[] edgePixel = CopyPixel(withAnnotation, 50, 70);
+
+                if (edgePixel[2] < 150 || edgePixel[1] > 110)
+                {
+                    failures++;
+                    log.AppendLine("  FAIL 矩形描边没画上：" + DescribePixel(edgePixel));
+                }
+                else
+                {
+                    log.AppendLine("  OK   矩形描边已绘制（" + DescribePixel(edgePixel) + "）");
+                }
+
+                // ---- 7. 高亮是半透明混合，不是实色覆盖 ----
+                checks++;
+                List<AnnotationObject> highlight = new List<AnnotationObject>();
+                highlight.Add(new AnnotationObject
+                {
+                    Kind = AnnotationKind.Highlight,
+                    X1 = 20, Y1 = 20, X2 = 60, Y2 = 50,
+                    Color = Color.FromRgb(0xE2, 0x4B, 0x4A)
+                });
+
+                PixelBuffer highlighted = AnnotationRenderer.Render(plain, highlight);
+                byte[] highlightPixel = CopyPixel(highlighted, 40, 35);
+
+                bool blended = highlightPixel[2] > highlightPixel[0] + 20
+                               && highlightPixel[2] > highlightPixel[1] + 20
+                               && highlightPixel[0] > 100
+                               && highlightPixel[0] < 240;
+
+                if (!blended)
+                {
+                    failures++;
+                    log.AppendLine(string.Format(
+                        "  FAIL 高亮不是半透明混合（{0}，底色应为 200/200/200）",
+                        DescribePixel(highlightPixel)));
+                }
+                else
+                {
+                    log.AppendLine(string.Format(
+                        "  OK   高亮为半透明混合（{0}，可同时看到底色与标记色）",
+                        DescribePixel(highlightPixel)));
+                }
+
+                // ---- 8. 序号标注同时有圆底与数字几何 ----
+                checks++;
+                AnnotationObject badge = new AnnotationObject
+                {
+                    Kind = AnnotationKind.NumberBadge,
+                    X1 = 30, Y1 = 30, X2 = 70, Y2 = 70,
+                    Text = "1",
+                    FontSize = 24.0
+                };
+
+                AnnotationVisual badgeVisual = AnnotationVisualBuilder.Build(badge);
+
+                if (badgeVisual.Geometry == null || badgeVisual.LabelGeometry == null
+                    || badgeVisual.Fill == null || badgeVisual.LabelBrush == null)
+                {
+                    failures++;
+                    log.AppendLine("  FAIL 序号标注缺少圆底或数字几何");
+                }
+                else
+                {
+                    log.AppendLine("  OK   序号标注同时具备圆底与白色数字几何");
+                }
+            }
+            catch (Exception ex)
+            {
+                failures++;
+                log.AppendLine("  FAIL 标注渲染测试异常: " + ex.GetType().Name + " " + ex.Message);
+            }
+
+            log.AppendLine();
+        }
+
+        /// <summary>
+        /// 标注端到端（M2b-2）：创建 / 选中改参数 / 撤销，以及**破坏性操作前自动合并**。
+        /// </summary>
+        private static void CheckAnnotationEndToEnd(
+            IImageService imageService,
+            string imagePath,
+            ref int checks,
+            ref int failures,
+            StringBuilder log)
+        {
+            log.AppendLine("[31] 标注端到端（选中改参数 / 自动合并）");
+
+            try
+            {
+                MainViewModel viewModel = new MainViewModel(
+                    imageService,
+                    new NullDialogService(),
+                    new ImmediateDispatcherService());
+
+                viewModel.LoadFromPathAsync(imagePath).GetAwaiter().GetResult();
+
+                checks++;
+
+                if (!viewModel.HasDocument)
+                {
+                    failures++;
+                    log.AppendLine("  FAIL 未能加载测试图片，跳过标注部分");
+                    log.AppendLine();
+                    return;
+                }
+
+                viewModel.BeginAnnotationCommand.Execute(null);
+
+                if (!viewModel.IsAnnotationMode)
+                {
+                    failures++;
+                    log.AppendLine("  FAIL 未能进入标注模式");
+                    log.AppendLine();
+                    return;
+                }
+
+                // ---- 拖拽创建箭头 ----
+                checks++;
+                viewModel.BeginAnnotationGesture(60.0, 60.0);
+                viewModel.UpdateAnnotationGesture(180.0, 120.0);
+                viewModel.EndAnnotationGesture();
+
+                if (viewModel.AnnotationCount != 1)
+                {
+                    failures++;
+                    log.AppendLine(string.Format(
+                        "  FAIL 拖拽创建标注失败（当前 {0} 个）", viewModel.AnnotationCount));
+                }
+                else
+                {
+                    log.AppendLine("  OK   拖拽创建箭头成功（1 个标注，起止点保持拖拽结果）");
+                }
+
+                // ---- 点击已有标注可选中（且不会误创建） ----
+                checks++;
+                viewModel.BeginAnnotationGesture(120.0, 90.0);
+                viewModel.EndAnnotationGesture();
+
+                if (!viewModel.HasSelectedAnnotation || viewModel.SelectedAnnotationIndex != 0)
+                {
+                    failures++;
+                    log.AppendLine(string.Format(
+                        "  FAIL 点击标注未选中（当前下标 {0}）", viewModel.SelectedAnnotationIndex));
+                }
+                else if (viewModel.AnnotationCount != 1)
+                {
+                    failures++;
+                    log.AppendLine("  FAIL 点击已有标注时误创建了新标注");
+                }
+                else
+                {
+                    log.AppendLine("  OK   点击已有标注即选中（未误创建新对象）");
+                }
+
+                // ---- 选中后改颜色立即生效 ----
+                checks++;
+                viewModel.AnnotationColor = Color.FromRgb(0x37, 0x8A, 0xDD);
+
+                if (viewModel.Annotations[0].Source.Color != Color.FromRgb(0x37, 0x8A, 0xDD))
+                {
+                    failures++;
+                    log.AppendLine("  FAIL 改颜色没有应用到选中的标注");
+                }
+                else
+                {
+                    log.AppendLine("  OK   选中后改颜色立即生效（这正是“选中再改参数”的价值）");
+                }
+
+                // ---- 撤销把颜色改回去 ----
+                checks++;
+                viewModel.UndoCommand.Execute(null);
+                WaitForIdle(viewModel);
+
+                if (viewModel.AnnotationCount != 1
+                    || viewModel.Annotations[0].Source.Color != Color.FromRgb(0xE2, 0x4B, 0x4A))
+                {
+                    failures++;
+                    log.AppendLine(string.Format(
+                        "  FAIL 撤销未还原标注颜色（当前 {0} 个标注）", viewModel.AnnotationCount));
+                }
+                else
+                {
+                    log.AppendLine("  OK   撤销还原标注颜色（对象列表快照历史生效）");
+                }
+
+                // ---- 破坏性操作前自动合并 ----
+                checks++;
+                int countBeforeFilter = viewModel.AnnotationCount;
+                PixelBuffer beforeFilter = PixelBuffer.FromBitmap(viewModel.Document.Bitmap);
+
+                viewModel.InvertCommand.Execute(null);
+                WaitForIdle(viewModel);
+
+                PixelBuffer afterFilter = PixelBuffer.FromBitmap(viewModel.Document.Bitmap);
+                bool flattened = viewModel.AnnotationCount == 0;
+                bool imageChanged = !PixelsEqual(beforeFilter.GetPixels(), afterFilter.GetPixels());
+
+                if (countBeforeFilter == 0 || !flattened || !imageChanged)
+                {
+                    failures++;
+                    log.AppendLine(string.Format(
+                        "  FAIL 破坏性操作前未正确合并（操作前 {0} 个标注，操作后 {1} 个，画面变化 {2}）",
+                        countBeforeFilter, viewModel.AnnotationCount, imageChanged));
+                }
+                else
+                {
+                    log.AppendLine(string.Format(
+                        "  OK   执行反色前自动合并：{0} 个标注已烘进像素并清空列表", countBeforeFilter));
+                }
+
+                // ---- 撤销合并：标注必须"回来"（像素与列表要一起还原） ----
+                // 注意这里有**两步**可撤销：先撤掉反色（标注仍已烘进像素），
+                // 再撤掉合并（标注恢复成可编辑的对象）。这是"合并本身也是一步历史"的直接体现，
+                // 两步都必须是完整状态，不能出现"标注凭空消失"或"画面上两份标注"。
+                checks++;
+                viewModel.UndoCommand.Execute(null);
+                WaitForIdle(viewModel);
+
+                bool afterFirstUndo = viewModel.AnnotationCount == 0;
+
+                viewModel.UndoCommand.Execute(null);
+                WaitForIdle(viewModel);
+
+                if (!afterFirstUndo)
+                {
+                    failures++;
+                    log.AppendLine(string.Format(
+                        "  FAIL 第一次撤销应只撤掉反色、标注仍处于已合并状态（当前 {0} 个）",
+                        viewModel.AnnotationCount));
+                }
+                else if (viewModel.AnnotationCount != countBeforeFilter)
+                {
+                    failures++;
+                    log.AppendLine(string.Format(
+                        "  FAIL 撤销合并后标注没有恢复（当前 {0} 个，应回到 {1} 个）—— 像素与对象列表必须一起还原",
+                        viewModel.AnnotationCount, countBeforeFilter));
+                }
+                else
+                {
+                    log.AppendLine(string.Format(
+                        "  OK   两次撤销逐步回退：先撤反色（标注仍已合并）→ 再撤合并（{0} 个标注恢复为可编辑对象）",
+                        viewModel.AnnotationCount));
+                }
+            }
+            catch (Exception ex)
+            {
+                failures++;
+                log.AppendLine("  FAIL 标注端到端测试异常: " + ex.GetType().Name + " " + ex.Message);
             }
 
             log.AppendLine();

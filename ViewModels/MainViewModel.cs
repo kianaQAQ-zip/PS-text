@@ -181,6 +181,9 @@ namespace PSText.ViewModels
             // 修补 / 消除（智能填充）命令（见 MainViewModel.Retouch.cs）
             InitializeRetouchCommands();
 
+            // 标注（非破坏性对象）命令（见 MainViewModel.Annotation.cs）
+            InitializeAnnotationCommands();
+
             // 打印与批量打印命令（见 MainViewModel.Print.cs）
             InitializePrintCommands();
 
@@ -861,6 +864,10 @@ namespace PSText.ViewModels
             {
                 return;
             }
+
+            // 导出文件必须包含标注。这里用"烘进标注的副本"，编辑现场仍然保持非破坏性 ——
+            // 用户存完盘后还能回头改那个箭头的颜色。
+            snapshot = WithAnnotationsBaked(snapshot);
 
             IsBusy = true;
             StatusMessage = "正在保存：" + Path.GetFileName(filePath);
