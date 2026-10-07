@@ -109,6 +109,9 @@ namespace PSText
                 CheckResizeAndArbitraryRotation(imageService, pngPath, ref checks, ref failures, log);
                 CheckInpaintFilter(ref checks, ref failures, log);
                 CheckRetouchEndToEnd(imageService, pngPath, ref checks, ref failures, log);
+                CheckCloneStampFilter(ref checks, ref failures, log);
+                CheckRegionHistory(ref checks, ref failures, log);
+                CheckCloneStampEndToEnd(imageService, pngPath, ref checks, ref failures, log);
                 log.AppendLine();
             }
             catch (Exception ex)
@@ -5010,6 +5013,650 @@ namespace PSText
             }
 
             log.AppendLine();
+        }
+
+        /// <summary>
+        /// 仿制图章（M2b）：验证"距离场覆盖率"这条实现路线的几个决定性性质。
+        ///
+        /// 最容易写错的两处，断言直接打在上面：
+        ///   1. **不累积** —— 同一点反复涂不能越涂越浓。用"笔迹反复回折到同一个点"来验证：
+        ///      若实现是逐个笔刷点叠加，中心会溢出或偏移；距离场只取一次覆盖，中心必须严格等于源像素。
+        ///   2. **源像素一律取自原图** —— 否则会出现"自我复制"的拖影。
+        /// 另外钉住"笔刷外逐字节不变"和"覆盖率随距离单调衰减"。
+        /// </summary>
+        private static void CheckCloneStampFilter(ref int checks, ref int failures, StringBuilder log)
+        {
+            log.AppendLine("[27] 仿制图章（距离场覆盖率）");
+
+            try
+            {
+                // 测试图：整体浅灰 (B200 G200 R200)，左上角一块深蓝方块 (B220 G60 R20)
+                const int width = 200;
+                const int height = 120;
+                PixelBuffer stampSource = CreateStampSource(width, height);
+
+                // ---- 1. 笔刷外必须逐字节不变，且包围盒只覆盖笔刷范围 ----
+                checks++;
+                List<StampPoint> single = new List<StampPoint>();
+                single.Add(new StampPoint(120.5, 60.5));
+
+                // 偏移 = 源点(10,60) − 笔迹起点(120,60) → 每涂一处都从左侧深蓝区取样
+                PixelRegion painted;
+                PixelBuffer stamped = CloneStampFilter.Stamp(
+                    stampSource, single, 10.0, 1.0, 10 - 120, 60 - 60, out painted);
+
+                byte[] before = stampSource.GetPixels();
+                byte[] after = stamped.GetPixels();
+                int outsideChanged = 0;
+
+                for (int y = 0; y < height; y++)
+                {
+                    for (int x = 0; x < width; x++)
+                    {
+                        double dx = x + 0.5 - 120.5;
+                        double dy = y + 0.5 - 60.5;
+
+                        if (Math.Sqrt(dx * dx + dy * dy) <= 10.0)
+                        {
+                            continue;
+                        }
+
+                        int index = (y * width + x) * 4;
+
+                        for (int channel = 0; channel < 4; channel++)
+                        {
+                            if (before[index + channel] != after[index + channel])
+                            {
+                                outsideChanged++;
+                                break;
+                            }
+                        }
+                    }
+                }
+
+                if (outsideChanged != 0)
+                {
+                    failures++;
+                    log.AppendLine(string.Format(
+                        "  FAIL 笔刷范围外有 {0} 个像素被改动（应逐字节不变）", outsideChanged));
+                }
+                else
+                {
+                    log.AppendLine("  OK   笔刷范围外逐字节不变（只涂到该涂的地方）");
+                }
+
+                // ---- 2. 涂抹包围盒应当正好等于笔刷直径（而不是整幅图） ----
+                checks++;
+                bool tightBounds = !painted.IsEmpty
+                                   && painted.Width >= 19
+                                   && painted.Width <= 22
+                                   && painted.Height >= 19
+                                   && painted.Height <= 22
+                                   && painted.X <= 120
+                                   && painted.Y <= 60;
+
+                if (!tightBounds)
+                {
+                    failures++;
+                    log.AppendLine(string.Format(
+                        "  FAIL 涂抹包围盒异常：({0},{1}) {2}×{3}，半径 10 时应在 20 左右",
+                        painted.X, painted.Y, painted.Width, painted.Height));
+                }
+                else
+                {
+                    log.AppendLine(string.Format(
+                        "  OK   涂抹包围盒正好是笔刷直径（{0}×{1}），可直接用于区域历史",
+                        painted.Width, painted.Height));
+                }
+
+                // ---- 3. 中心满覆盖：必须严格等于源像素值 ----
+                checks++;
+                byte[] centerPixel = CopyPixel(stamped, 120, 60);
+                byte[] sourcePixel = CopyPixel(stampSource, 10, 60);
+
+                bool centerMatches = centerPixel[0] == sourcePixel[0]
+                                     && centerPixel[1] == sourcePixel[1]
+                                     && centerPixel[2] == sourcePixel[2];
+
+                if (!centerMatches)
+                {
+                    failures++;
+                    log.AppendLine(string.Format(
+                        "  FAIL 笔刷中心未取到源像素（中心 {0}，源 {1}）",
+                        DescribePixel(centerPixel), DescribePixel(sourcePixel)));
+                }
+                else
+                {
+                    log.AppendLine(string.Format(
+                        "  OK   笔刷中心严格等于源像素（{0}），偏移取样正确",
+                        DescribePixel(sourcePixel)));
+                }
+
+                // ---- 4. 反复回折到同一点不能累积 ----
+                checks++;
+                List<StampPoint> repeated = new List<StampPoint>();
+
+                for (int i = 0; i < 60; i++)
+                {
+                    repeated.Add(new StampPoint(120.5, 60.5));
+                    repeated.Add(new StampPoint(121.5, 60.5));
+                }
+
+                PixelRegion repeatedBounds;
+                PixelBuffer repeatedStamped = CloneStampFilter.Stamp(
+                    stampSource, repeated, 10.0, 1.0, 10 - 120, 60 - 60, out repeatedBounds);
+
+                byte[] repeatedCenter = CopyPixel(repeatedStamped, 120, 60);
+                bool noAccumulation = repeatedCenter[0] == sourcePixel[0]
+                                      && repeatedCenter[1] == sourcePixel[1]
+                                      && repeatedCenter[2] == sourcePixel[2];
+
+                if (!noAccumulation)
+                {
+                    failures++;
+                    log.AppendLine(string.Format(
+                        "  FAIL 同一位置反复涂抹产生了累积（中心 {0}，源 {1}）",
+                        DescribePixel(repeatedCenter), DescribePixel(sourcePixel)));
+                }
+                else
+                {
+                    log.AppendLine("  OK   笔迹反复回折也不会累积（距离场只取一次覆盖率）");
+                }
+
+                // ---- 5. 覆盖率随距离单调衰减（硬度 0.5 才真正走出过渡带） ----
+                checks++;
+                PixelRegion softBounds;
+                PixelBuffer softStamped = CloneStampFilter.Stamp(
+                    stampSource, single, 10.0, 0.5, 10 - 120, 60 - 60, out softBounds);
+
+                int previousDifference = int.MaxValue;
+                bool monotonic = true;
+
+                for (int x = 120; x <= 131; x++)
+                {
+                    byte[] pixel = CopyPixel(softStamped, x, 60);
+                    int index = (60 * width + x) * 4;
+
+                    int difference = Math.Abs(pixel[0] - before[index])
+                                     + Math.Abs(pixel[1] - before[index + 1])
+                                     + Math.Abs(pixel[2] - before[index + 2]);
+
+                    if (difference > previousDifference)
+                    {
+                        monotonic = false;
+                        break;
+                    }
+
+                    previousDifference = difference;
+                }
+
+                if (!monotonic)
+                {
+                    failures++;
+                    log.AppendLine("  FAIL 覆盖率未随离笔迹的距离单调衰减");
+                }
+                else
+                {
+                    log.AppendLine("  OK   覆盖率随距离单调衰减（笔刷边缘自然过渡）");
+                }
+
+                // ---- 6. 空笔迹不改变任何像素 ----
+                checks++;
+                PixelRegion emptyBounds;
+                PixelBuffer noStroke = CloneStampFilter.Stamp(
+                    stampSource, new List<StampPoint>(), 10.0, 0.5, 0, 0, out emptyBounds);
+
+                if (emptyBounds.IsEmpty == false || !PixelsEqual(before, noStroke.GetPixels()))
+                {
+                    failures++;
+                    log.AppendLine("  FAIL 空笔迹改动了像素（应原样返回）");
+                }
+                else
+                {
+                    log.AppendLine("  OK   空笔迹原样返回（不产生无意义的历史步）");
+                }
+
+                // ---- 7. 性能：800×600 图上一条中等长度的笔迹 ----
+                checks++;
+                PixelBuffer perfSource = CreateTestBuffer(800, 600);
+                List<StampPoint> perfStroke = new List<StampPoint>();
+
+                for (int i = 0; i < 60; i++)
+                {
+                    perfStroke.Add(new StampPoint(200 + i * 6, 300 + i * 2));
+                }
+
+                System.Diagnostics.Stopwatch watch = System.Diagnostics.Stopwatch.StartNew();
+                PixelRegion perfBounds;
+                CloneStampFilter.Stamp(perfSource, perfStroke, 24.0, 0.6, -50, -50, out perfBounds);
+                watch.Stop();
+
+                if (watch.ElapsedMilliseconds > 3000)
+                {
+                    failures++;
+                    log.AppendLine(string.Format(
+                        "  FAIL 仿制图章过慢：800×600 图上一条笔迹耗时 {0} ms", watch.ElapsedMilliseconds));
+                }
+                else
+                {
+                    log.AppendLine(string.Format(
+                        "  OK   性能：800×600 图上一条 60 段笔迹耗时 {0} ms", watch.ElapsedMilliseconds));
+                }
+            }
+            catch (Exception ex)
+            {
+                failures++;
+                log.AppendLine("  FAIL 仿制图章测试异常: " + ex.GetType().Name + " " + ex.Message);
+            }
+
+            log.AppendLine();
+        }
+
+        /// <summary>
+        /// 区域历史（M2b）：验证它确实把内存压下来了，并且撤销 / 重做逐像素正确。
+        /// </summary>
+        private static void CheckRegionHistory(ref int checks, ref int failures, StringBuilder log)
+        {
+            log.AppendLine("[28] 区域历史（只存改动包围盒）");
+
+            try
+            {
+                // ---- 1. 一条区域命令的体积 vs 整幅快照 ----
+                checks++;
+                int imageWidth = 2000;
+                int imageHeight = 2000;
+                int regionWidth = 200;
+                int regionHeight = 200;
+
+                byte[] beforeRegion = new byte[regionWidth * regionHeight * 4];
+                byte[] afterRegion = new byte[regionWidth * regionHeight * 4];
+
+                RegionEditCommand probe = new RegionEditCommand(
+                    "测试", imageWidth, 100, 100, regionWidth, regionHeight,
+                    beforeRegion, afterRegion, (x, y, w, h, data) => { });
+
+                long fullBitmapBytes = (long)imageWidth * imageHeight * 4;
+                long commandBytes = probe.ByteSize;
+
+                if (commandBytes != (long)regionWidth * regionHeight * 4 * 2)
+                {
+                    failures++;
+                    log.AppendLine(string.Format(
+                        "  FAIL 区域命令体积不符（{0} 字节，期望 {1}）",
+                        commandBytes, regionWidth * regionHeight * 8L));
+                }
+                else if (commandBytes * 10 >= fullBitmapBytes)
+                {
+                    failures++;
+                    log.AppendLine(string.Format(
+                        "  FAIL 区域命令没有明显省内存（{0} 字节 vs 整幅 {1} 字节）",
+                        commandBytes, fullBitmapBytes));
+                }
+                else
+                {
+                    log.AppendLine(string.Format(
+                        "  OK   200×200 的区域命令只占 {0} 字节，而整幅位图是 {1} 字节（相差 {2:0} 倍）",
+                        commandBytes, fullBitmapBytes, (double)fullBitmapBytes / commandBytes));
+                }
+
+                // ---- 2. HistoryManager 必须把命令自有的字节算进内存上限 ----
+                checks++;
+                HistoryManager history = new HistoryManager(100, 400L * 1024L);
+
+                for (int i = 0; i < 3; i++)
+                {
+                    history.Push(
+                        new RegionEditCommand(
+                            "涂抹", imageWidth, 0, 0, regionWidth, regionHeight,
+                            new byte[regionWidth * regionHeight * 4],
+                            new byte[regionWidth * regionHeight * 4],
+                            (x, y, w, h, data) => { }),
+                        null);
+                }
+
+                if (history.MemoryUsage < commandBytes)
+                {
+                    failures++;
+                    log.AppendLine(string.Format(
+                        "  FAIL 区域命令的字节未被计入历史内存（统计 {0}，命令本身 {1}）",
+                        history.MemoryUsage, commandBytes));
+                }
+                else if (history.UndoCount >= 3)
+                {
+                    failures++;
+                    log.AppendLine(string.Format(
+                        "  FAIL 超出内存上限后未裁剪（仍有 {0} 步，占用 {1}）",
+                        history.UndoCount, history.MemoryUsageText));
+                }
+                else
+                {
+                    log.AppendLine(string.Format(
+                        "  OK   命令自有字节已计入上限：超出 400 KB 预算后裁剪到 {0} 步（占用 {1}）",
+                        history.UndoCount, history.MemoryUsageText));
+                }
+
+                // ---- 3. 撤销 / 重做写回的区域必须逐字节正确 ----
+                checks++;
+                PixelBuffer target = CreateSolidBuffer(40, 40, 10, 20, 30);
+                byte[] targetPixels = target.GetPixels();
+                byte[] painted = new byte[10 * 10 * 4];
+
+                for (int i = 0; i < painted.Length; i += 4)
+                {
+                    painted[i] = 200;
+                    painted[i + 1] = 100;
+                    painted[i + 2] = 50;
+                    painted[i + 3] = 255;
+                }
+
+                byte[] originalRegion = new byte[painted.Length];
+                int rowBytes = 10 * 4;
+
+                for (int row = 0; row < 10; row++)
+                {
+                    Buffer.BlockCopy(targetPixels, ((5 + row) * 40 + 5) * 4, originalRegion, row * rowBytes, rowBytes);
+                }
+
+                PixelBuffer working = new PixelBuffer((byte[])targetPixels.Clone(), 40, 40);
+
+                RegionEditCommand command = new RegionEditCommand(
+                    "区域",
+                    40,
+                    5,
+                    5,
+                    10,
+                    10,
+                    originalRegion,
+                    painted,
+                    (x, y, w, h, data) =>
+                    {
+                        for (int row = 0; row < h; row++)
+                        {
+                            Buffer.BlockCopy(data, row * w * 4, working.GetPixels(), ((y + row) * 40 + x) * 4, w * 4);
+                        }
+                    });
+
+                command.Redo();
+                byte[] afterRedo = CopyPixel(working, 9, 9);
+                byte[] outsidePixel = CopyPixel(working, 2, 2);
+                byte[] outsidePixel2 = CopyPixel(working, 20, 20);
+
+                // CreateSolidBuffer(40, 40, r: 10, g: 20, b: 30) → B=30 G=20 R=10
+                bool redoOk = afterRedo[0] == 200 && afterRedo[1] == 100 && afterRedo[2] == 50;
+                bool outsideOk = outsidePixel[0] == 30 && outsidePixel[1] == 20 && outsidePixel[2] == 10
+                                 && outsidePixel2[0] == 30 && outsidePixel2[1] == 20 && outsidePixel2[2] == 10;
+
+                command.Undo();
+                byte[] afterUndo = CopyPixel(working, 9, 9);
+                bool undoOk = afterUndo[0] == 30 && afterUndo[1] == 20 && afterUndo[2] == 10;
+
+                if (!redoOk || !undoOk || !outsideOk)
+                {
+                    failures++;
+                    log.AppendLine(string.Format(
+                        "  FAIL 区域写回不正确（重做后 {0}，撤销后 {1}，区域外未被误改 {2}）",
+                        DescribePixel(afterRedo), DescribePixel(afterUndo), outsideOk));
+                }
+                else
+                {
+                    log.AppendLine("  OK   区域写回正确：重做只改包围盒、撤销逐字节还原");
+                }
+            }
+            catch (Exception ex)
+            {
+                failures++;
+                log.AppendLine("  FAIL 区域历史测试异常: " + ex.GetType().Name + " " + ex.Message);
+            }
+
+            log.AppendLine();
+        }
+
+        /// <summary>
+        /// 仿制图章端到端：工具切换、取源、涂抹提交、撤销 / 重做逐像素一致。
+        /// </summary>
+        private static void CheckCloneStampEndToEnd(
+            IImageService imageService,
+            string imagePath,
+            ref int checks,
+            ref int failures,
+            StringBuilder log)
+        {
+            log.AppendLine("[29] 仿制图章端到端（取源 / 涂抹 / 撤销）");
+
+            try
+            {
+                MainViewModel viewModel = new MainViewModel(
+                    imageService,
+                    new NullDialogService(),
+                    new ImmediateDispatcherService());
+
+                viewModel.LoadFromPathAsync(imagePath).GetAwaiter().GetResult();
+
+                checks++;
+
+                if (!viewModel.HasDocument)
+                {
+                    failures++;
+                    log.AppendLine("  FAIL 未能加载测试图片，跳过仿制图章部分");
+                    log.AppendLine();
+                    return;
+                }
+
+                viewModel.BeginRetouchCommand.Execute(null);
+
+                // ---- 切到仿制图章后，智能填充必须不可用 ----
+                checks++;
+                viewModel.RetouchToolIndex = 1;
+
+                if (!viewModel.IsCloneStampTool)
+                {
+                    failures++;
+                    log.AppendLine("  FAIL 未能切换到仿制图章工具");
+                    log.AppendLine();
+                    return;
+                }
+
+                if (viewModel.CanApplyInpaint || viewModel.ApplyInpaintCommand.CanExecute(null))
+                {
+                    failures++;
+                    log.AppendLine("  FAIL 仿制图章模式下「智能填充」应为不可用");
+                }
+                else
+                {
+                    log.AppendLine("  OK   切到仿制图章后「智能填充」自动不可用（工具互斥清楚）");
+                }
+
+                // ---- 未取源就涂抹：不应改动画面 ----
+                checks++;
+                viewModel.BrushRadius = 16.0;
+                viewModel.BrushHardness = 0.8;
+
+                PixelBuffer beforeAny = PixelBuffer.FromBitmap(viewModel.Document.Bitmap);
+
+                viewModel.BeginRetouchGesture(200.0, 120.0, false);
+                viewModel.UpdateRetouchGesture(240.0, 130.0);
+                viewModel.EndRetouchGesture();
+                WaitForIdle(viewModel);
+
+                PixelBuffer afterNoSource = PixelBuffer.FromBitmap(viewModel.Document.Bitmap);
+
+                if (!PixelsEqual(beforeAny.GetPixels(), afterNoSource.GetPixels()))
+                {
+                    failures++;
+                    log.AppendLine("  FAIL 未取源就涂抹却改动了画面（应提示先取源）");
+                }
+                else
+                {
+                    log.AppendLine("  OK   未取源时涂抹不改动画面（只给出提示）");
+                }
+
+                // ---- 取源并涂抹 ----
+                checks++;
+                viewModel.SetCloneStampSource(120.0, 80.0);
+
+                PixelBuffer beforeStroke = PixelBuffer.FromBitmap(viewModel.Document.Bitmap);
+                int imageWidth = viewModel.Document.PixelWidth;
+                int imageHeight = viewModel.Document.PixelHeight;
+
+                viewModel.BeginRetouchGesture(200.0, 120.0, false);
+                viewModel.UpdateRetouchGesture(230.0, 130.0);
+                viewModel.UpdateRetouchGesture(250.0, 140.0);
+                viewModel.EndRetouchGesture();
+                WaitForIdle(viewModel);
+
+                PixelBuffer afterStroke = PixelBuffer.FromBitmap(viewModel.Document.Bitmap);
+                byte[] beforePixels = beforeStroke.GetPixels();
+                byte[] afterPixels = afterStroke.GetPixels();
+
+                int changed = 0;
+                int changedFarAway = 0;
+                int radius = (int)Math.Ceiling(viewModel.BrushRadius) + 2;
+
+                // 笔迹经过 (200,120) → (250,140)，改动只应出现在这条带子附近
+                for (int y = 0; y < imageHeight; y++)
+                {
+                    for (int x = 0; x < imageWidth; x++)
+                    {
+                        int index = (y * imageWidth + x) * 4;
+                        bool differs = false;
+
+                        for (int channel = 0; channel < 4; channel++)
+                        {
+                            if (beforePixels[index + channel] != afterPixels[index + channel])
+                            {
+                                differs = true;
+                                break;
+                            }
+                        }
+
+                        if (!differs)
+                        {
+                            continue;
+                        }
+
+                        changed++;
+
+                        bool nearStroke = IsNearStroke(x, y, 200, 120, 250, 140, radius);
+
+                        if (!nearStroke)
+                        {
+                            changedFarAway++;
+                        }
+                    }
+                }
+
+                if (changed == 0)
+                {
+                    failures++;
+                    log.AppendLine("  FAIL 涂抹未产生任何改动");
+                }
+                else if (changedFarAway != 0)
+                {
+                    failures++;
+                    log.AppendLine(string.Format(
+                        "  FAIL 笔迹之外有 {0} 个像素被改动（共改动 {1} 个）", changedFarAway, changed));
+                }
+                else
+                {
+                    log.AppendLine(string.Format(
+                        "  OK   涂抹生效：改动 {0} 个像素，全部落在笔迹带内（无越界改动）", changed));
+                }
+
+                // ---- 撤销必须逐像素还原 ----
+                checks++;
+                viewModel.UndoCommand.Execute(null);
+                WaitForIdle(viewModel);
+
+                PixelBuffer undone = PixelBuffer.FromBitmap(viewModel.Document.Bitmap);
+
+                if (!PixelsEqual(beforePixels, undone.GetPixels()))
+                {
+                    failures++;
+                    log.AppendLine("  FAIL 撤销未逐像素还原涂抹");
+                }
+                else
+                {
+                    log.AppendLine("  OK   撤销逐像素还原涂抹（区域历史生效）");
+                }
+
+                // ---- 重做必须逐像素复现 ----
+                checks++;
+                viewModel.RedoCommand.Execute(null);
+                WaitForIdle(viewModel);
+
+                PixelBuffer redone = PixelBuffer.FromBitmap(viewModel.Document.Bitmap);
+
+                if (!PixelsEqual(afterPixels, redone.GetPixels()))
+                {
+                    failures++;
+                    log.AppendLine("  FAIL 重做未逐像素复现涂抹结果");
+                }
+                else
+                {
+                    log.AppendLine("  OK   重做逐像素复现涂抹结果");
+                }
+            }
+            catch (Exception ex)
+            {
+                failures++;
+                log.AppendLine("  FAIL 仿制图章端到端测试异常: " + ex.GetType().Name + " " + ex.Message);
+            }
+
+            log.AppendLine();
+        }
+
+        /// <summary>点 (x, y) 是否落在以 (x1,y1)-(x2,y2) 为轴的胶囊带内（用于校验涂抹范围）。</summary>
+        private static bool IsNearStroke(int x, int y, int x1, int y1, int x2, int y2, int radius)
+        {
+            double dx = x2 - x1;
+            double dy = y2 - y1;
+            double lengthSquared = dx * dx + dy * dy;
+
+            double t = lengthSquared <= 1e-9
+                ? 0.0
+                : ((x - x1) * dx + (y - y1) * dy) / lengthSquared;
+
+            if (t < 0.0)
+            {
+                t = 0.0;
+            }
+            else if (t > 1.0)
+            {
+                t = 1.0;
+            }
+
+            double closestX = x1 + t * dx;
+            double closestY = y1 + t * dy;
+            double ex = x - closestX;
+            double ey = y - closestY;
+
+            return Math.Sqrt(ex * ex + ey * ey) <= radius;
+        }
+
+        /// <summary>
+        /// 仿制图章的测试底图：左半边深蓝 (B220 G60 R20) 作为"源纹理"，右半边浅灰 (B200 G200 R200)。
+        /// 用左右分界而不是一个小方块，是为了让"源区域"能完整覆盖偏移后的取样范围，
+        /// 这样涂抹包围盒才正好等于笔刷直径，便于断言。
+        /// </summary>
+        private static PixelBuffer CreateStampSource(int width, int height)
+        {
+            byte[] pixels = new byte[width * height * 4];
+
+            for (int y = 0; y < height; y++)
+            {
+                for (int x = 0; x < width; x++)
+                {
+                    int index = (y * width + x) * 4;
+                    bool patch = x < width / 2;
+
+                    pixels[index] = patch ? (byte)220 : (byte)200;      // B
+                    pixels[index + 1] = patch ? (byte)60 : (byte)200;   // G
+                    pixels[index + 2] = patch ? (byte)20 : (byte)200;   // R
+                    pixels[index + 3] = 255;
+                }
+            }
+
+            return new PixelBuffer(pixels, width, height);
         }
 
         /// <summary>

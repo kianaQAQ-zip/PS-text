@@ -10,13 +10,28 @@ using Rect = System.Windows.Rect;
 
 namespace PSText.ViewModels
 {
+    /// <summary>修补模式下可选的工具。</summary>
+    public enum RetouchTool
+    {
+        /// <summary>智能填充：框选后按周围像素重建（纯色 / 渐变背景效果最好）。</summary>
+        Inpaint = 0,
+
+        /// <summary>仿制图章：手动指定源纹理后涂抹（纹理背景的兜底手段）。</summary>
+        CloneStamp = 1
+    }
+
     /// <summary>
     /// MainViewModel 的「修补 / 消除」部分（partial，对应 M2 的第一块）。
     ///
     /// 定位：办公图片处理里"把不要的东西从画面上拿走"这件事 —— 水印、印章、日期戳、
-    /// 编号标签、污渍。工具是**智能填充**（掩膜 + 调和扩散），手动兜底留给后续的仿制图章。
+    /// 编号标签、污渍。
     ///
-    /// 交互模型刻意做得简单可靠：
+    /// 两个工具，分工明确：
+    ///   - **智能填充**（本文件）：框选后按周围像素重建，纯色 / 渐变背景上效果最好；
+    ///   - **仿制图章**（见 MainViewModel.Stamp.cs）：手动指定源纹理后涂抹，
+    ///     用于纹理背景上调和填充会留平滑斑块的情况。
+    ///
+    /// 交互模型（智能填充）：
     ///   1. 进入修补模式 → 在画布上**拖拽出矩形**框住要消掉的东西；
     ///   2. 可以连续框选多处（标记是叠加的），标记以半透明红色显示；
     ///   3. 点「智能填充」一次性处理 —— **一次操作只产生一步历史**，可整体撤销。
@@ -33,6 +48,7 @@ namespace PSText.ViewModels
 
         private readonly ObservableCollection<Rect> _retouchRects = new ObservableCollection<Rect>();
 
+        private RetouchTool _retouchTool = RetouchTool.Inpaint;
         private bool _isRetouchMode;
         private byte[] _retouchMask;
         private long _retouchMaskPixels;
@@ -124,6 +140,52 @@ namespace PSText.ViewModels
                     RelayCommand.RaiseCanExecuteChanged();
                 }
             }
+        }
+
+        /// <summary>当前修补工具。</summary>
+        public RetouchTool RetouchTool
+        {
+            get { return _retouchTool; }
+            private set
+            {
+                if (value == _retouchTool)
+                {
+                    return;
+                }
+
+                // 切换工具时丢掉进行中的临时状态，避免"框选到一半切到图章"这类错位
+                CancelRetouchGesture();
+
+                _retouchTool = value;
+
+                OnPropertyChanged("RetouchTool");
+                OnPropertyChanged("RetouchToolIndex");
+                OnPropertyChanged("IsCloneStampTool");
+                OnPropertyChanged("IsBrushCursorVisible");
+                OnPropertyChanged("CanApplyInpaint");
+                RelayCommand.RaiseCanExecuteChanged();
+
+                StatusMessage = value == RetouchTool.CloneStamp
+                    ? "仿制图章：按住 Alt 在画布上点一下取源，再拖拽涂抹"
+                    : "智能填充：在画布上拖拽矩形框住要去掉的内容";
+            }
+        }
+
+        /// <summary>供下拉框绑定的工具索引（0 智能填充 / 1 仿制图章）。</summary>
+        public int RetouchToolIndex
+        {
+            get { return (int)_retouchTool; }
+            set
+            {
+                int clamped = value < 0 ? 0 : (value > 1 ? 1 : value);
+                RetouchTool = (RetouchTool)clamped;
+            }
+        }
+
+        /// <summary>当前是否为仿制图章工具。</summary>
+        public bool IsCloneStampTool
+        {
+            get { return _retouchTool == RetouchTool.CloneStamp; }
         }
 
         /// <summary>已提交的标记矩形（供界面叠加显示）。</summary>
@@ -218,6 +280,12 @@ namespace PSText.ViewModels
         {
             get
             {
+                // 标记只在智能填充工具下才能产生，因此换到仿制图章后这个按钮就不该可用
+                if (_retouchTool != RetouchTool.Inpaint)
+                {
+                    return false;
+                }
+
                 if (!HasDocument || IsBusy || !IsRetouchMode || _retouchMaskPixels <= 0)
                 {
                     return false;
@@ -247,21 +315,92 @@ namespace PSText.ViewModels
                 CancelCrop();
             }
 
+            CancelRetouchGesture();
+
             IsRetouchMode = true;
-            StatusMessage = "修补模式：在画布上拖拽框住要去掉的水印 / 印章，然后点“智能填充”";
+            StatusMessage = _retouchTool == RetouchTool.CloneStamp
+                ? "仿制图章：按住 Alt 在画布上点一下取源，再拖拽涂抹"
+                : "智能填充：在画布上拖拽框住要去掉的水印 / 印章，然后点“智能填充”";
         }
 
         private void ExitRetouch()
         {
             IsRetouchMode = false;
-            HasPendingRect = false;
-            _isRetouchDragging = false;
+            CancelRetouchGesture();
+            HideRetouchCursor();
             StatusMessage = "已退出修补模式（标记已保留，可再次进入继续处理）";
         }
 
         #endregion
 
         #region 画布交互（由 View 回传图像像素坐标）
+
+        /// <summary>
+        /// 开始一次画布手势。由 View 转发坐标与修饰键，具体动作交给这里按当前工具决定 ——
+        /// 这样 View 只是一条"哑"的转发通道，不需要判断当前是哪个工具。
+        /// </summary>
+        /// <param name="setSourcePoint">是否按住了 Alt（仿制图章下表示"取源"）。</param>
+        public void BeginRetouchGesture(double imageX, double imageY, bool setSourcePoint)
+        {
+            if (!_isRetouchMode || _document == null)
+            {
+                return;
+            }
+
+            if (_retouchTool == RetouchTool.CloneStamp)
+            {
+                if (setSourcePoint)
+                {
+                    SetCloneStampSource(imageX, imageY);
+                    return;
+                }
+
+                BeginStampStroke(imageX, imageY);
+                return;
+            }
+
+            BeginRetouchSelect(imageX, imageY);
+        }
+
+        /// <summary>更新一次画布手势。</summary>
+        public void UpdateRetouchGesture(double imageX, double imageY)
+        {
+            if (_retouchTool == RetouchTool.CloneStamp)
+            {
+                UpdateStampStroke(imageX, imageY);
+                return;
+            }
+
+            UpdateRetouchSelect(imageX, imageY);
+        }
+
+        /// <summary>结束一次画布手势。</summary>
+        public void EndRetouchGesture()
+        {
+            if (_retouchTool == RetouchTool.CloneStamp)
+            {
+                EndStampStroke();
+                return;
+            }
+
+            EndRetouchSelect();
+        }
+
+        /// <summary>丢弃进行中的框选 / 涂抹（切换工具、退出模式时调用）。</summary>
+        private void CancelRetouchGesture()
+        {
+            _isRetouchDragging = false;
+            HasPendingRect = false;
+            PendingRect = new Rect(0.0, 0.0, 0.0, 0.0);
+
+            if (_strokeActive)
+            {
+                _strokeActive = false;
+                _strokePoints.Clear();
+                _brushTrailPoints = new System.Windows.Media.PointCollection();
+                RaiseTrailChanged();
+            }
+        }
 
         /// <summary>开始拖拽标记矩形。</summary>
         public void BeginRetouchSelect(double imageX, double imageY)

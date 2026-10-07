@@ -93,6 +93,15 @@ namespace PSText.Models
         /// <summary>命令所引用的全部状态（供 HistoryManager 统一统计与裁剪内存）。</summary>
         System.Collections.Generic.IEnumerable<EditState> States { get; }
 
+        /// <summary>
+        /// 命令**自身**占用的字节数（不含 States 里的快照）。
+        ///
+        /// 整幅快照型命令返回 0（内存由 EditState.Snapshot 统计）；
+        /// 区域编辑命令（RegionEditCommand）则要把前后两份区域像素报出来，
+        /// 否则它的数据不会被计入历史内存上限 —— 那正是这类命令最容易失控的地方。
+        /// </summary>
+        long ByteSize { get; }
+
         /// <summary>执行（重做）。</summary>
         void Redo();
 
@@ -133,6 +142,12 @@ namespace PSText.Models
         public System.Collections.Generic.IEnumerable<EditState> States
         {
             get { return _states; }
+        }
+
+        /// <summary>本命令不额外占用内存（像素数据都由 EditState 的快照统计）。</summary>
+        public long ByteSize
+        {
+            get { return 0L; }
         }
 
         /// <summary>调整前的状态（撤销目标）。</summary>
@@ -209,6 +224,12 @@ namespace PSText.Models
         public System.Collections.Generic.IEnumerable<EditState> States
         {
             get { return _states; }
+        }
+
+        /// <summary>本命令不额外占用内存（像素数据都由 EditState 的快照统计）。</summary>
+        public long ByteSize
+        {
+            get { return 0L; }
         }
 
         /// <summary>编辑前的状态（撤销目标）。</summary>

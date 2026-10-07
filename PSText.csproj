@@ -163,6 +163,7 @@
     <Compile Include="Models\ImageSaveOptions.cs" />
     <Compile Include="Models\PixelAdjustments.cs" />
     <Compile Include="Models\EditCommand.cs" />
+    <Compile Include="Models\RegionEditCommand.cs" />
   </ItemGroup>
 
   <!-- ============ 服务 ============ -->
@@ -189,6 +190,7 @@
     <Compile Include="Services\Filters\GeometryFilters.cs" />
     <Compile Include="Services\Filters\Resampler.cs" />
     <Compile Include="Services\Filters\InpaintFilter.cs" />
+    <Compile Include="Services\Filters\CloneStampFilter.cs" />
     <Compile Include="Services\Filters\BorderFilters.cs" />
     <Compile Include="Services\Filters\TextOverlayFilter.cs" />
   </ItemGroup>
@@ -201,6 +203,7 @@
     <Compile Include="ViewModels\MainViewModel.Crop.cs" />
     <Compile Include="ViewModels\MainViewModel.Geometry.cs" />
     <Compile Include="ViewModels\MainViewModel.Retouch.cs" />
+    <Compile Include="ViewModels\MainViewModel.Stamp.cs" />
     <Compile Include="ViewModels\MainViewModel.Print.cs" />
     <Compile Include="ViewModels\MainViewModel.Settings.cs" />
     <Compile Include="ViewModels\PrintPreviewViewModel.cs" />

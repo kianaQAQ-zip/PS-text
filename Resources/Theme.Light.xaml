@@ -43,6 +43,9 @@
   <SolidColorBrush x:Key="RetouchMaskFillBrush" Color="#44E24B4A" />
   <SolidColorBrush x:Key="RetouchMaskStrokeBrush" Color="#FFE24B4A" />
 
+  <!-- 仿制图章的取源点标记（绿色，与笔刷光标的强调色区分开） -->
+  <SolidColorBrush x:Key="CloneStampSourceBrush" Color="#FF1D9E75" />
+
   <!-- 棋盘格（浅色主题用浅灰，避免深色底纹） -->
   <SolidColorBrush x:Key="CheckerLightBrush" Color="#FFF0F0F0" />
   <SolidColorBrush x:Key="CheckerDarkBrush" Color="#FFE0E0E0" />

@@ -83,16 +83,43 @@ namespace PSText.Infrastructure.History
             get { return _maxBytes; }
         }
 
-        /// <summary>历史当前占用的字节数。</summary>
+        /// <summary>历史当前占用的字节数（整幅快照 + 命令自有的区域像素）。</summary>
         public long MemoryUsage
         {
-            get { return _ownedBytes; }
+            get { return _ownedBytes + CommandBytes; }
+        }
+
+        /// <summary>
+        /// 各命令自身占用的字节数之和。
+        ///
+        /// 区域编辑命令（RegionEditCommand）不引用整幅快照，它的前后区域像素是命令私有的，
+        /// 因此必须单独统计 —— 否则仿制图章这类"一笔一步"的高频编辑会绕过内存上限。
+        /// 栈深最多几十条，直接遍历求和的代价可以忽略。
+        /// </summary>
+        private long CommandBytes
+        {
+            get
+            {
+                long total = 0L;
+
+                for (int i = 0; i < _undoStack.Count; i++)
+                {
+                    total += _undoStack[i].ByteSize;
+                }
+
+                for (int i = 0; i < _redoStack.Count; i++)
+                {
+                    total += _redoStack[i].ByteSize;
+                }
+
+                return total;
+            }
         }
 
         /// <summary>内存占用的可读文本。</summary>
         public string MemoryUsageText
         {
-            get { return FormatBytes(_ownedBytes); }
+            get { return FormatBytes(MemoryUsage); }
         }
 
         /// <summary>下一步撤销的操作名。</summary>
@@ -295,7 +322,7 @@ namespace PSText.Infrastructure.History
 
             // 2. 字节上限（至少保留 1 步，否则“撤销”就没意义了）
             int guard = 0;
-            while (_ownedBytes > _maxBytes && _undoStack.Count > 1 && guard++ < 10000)
+            while (MemoryUsage > _maxBytes && _undoStack.Count > 1 && guard++ < 10000)
             {
                 DropOldest();
             }

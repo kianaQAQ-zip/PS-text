@@ -693,7 +693,11 @@ namespace PSText.Views
                 return;
             }
 
-            viewModel.BeginRetouchSelect(imageX, imageY);
+            // Alt 在仿制图章下表示“取源”。修饰键的判断放在这里（View 的本职工作就是转发手势），
+            // 至于“取源还是涂抹”由 ViewModel 按当前工具决定。
+            bool setSourcePoint = (Keyboard.Modifiers & ModifierKeys.Alt) == ModifierKeys.Alt;
+
+            viewModel.BeginRetouchGesture(imageX, imageY, setSourcePoint);
             RetouchOverlay.CaptureMouse();
             e.Handled = true;
         }
@@ -706,11 +710,6 @@ namespace PSText.Views
                 return;
             }
 
-            if (e.LeftButton != MouseButtonState.Pressed)
-            {
-                return;
-            }
-
             double imageX;
             double imageY;
 
@@ -719,7 +718,15 @@ namespace PSText.Views
                 return;
             }
 
-            viewModel.UpdateRetouchSelect(imageX, imageY);
+            // 笔刷光标要跟随鼠标，所以未按下时也要回传位置
+            viewModel.UpdateRetouchCursor(imageX, imageY);
+
+            if (e.LeftButton != MouseButtonState.Pressed)
+            {
+                return;
+            }
+
+            viewModel.UpdateRetouchGesture(imageX, imageY);
             e.Handled = true;
         }
 
@@ -729,12 +736,22 @@ namespace PSText.Views
 
             if (viewModel != null)
             {
-                viewModel.EndRetouchSelect();
+                viewModel.EndRetouchGesture();
             }
 
             if (RetouchOverlay != null && Mouse.Captured == RetouchOverlay)
             {
                 RetouchOverlay.ReleaseMouseCapture();
+            }
+        }
+
+        private void OnRetouchMouseLeave(object sender, MouseEventArgs e)
+        {
+            MainViewModel viewModel = ViewModel;
+
+            if (viewModel != null)
+            {
+                viewModel.HideRetouchCursor();
             }
         }
 

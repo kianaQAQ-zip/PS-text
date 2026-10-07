@@ -297,6 +297,7 @@
                     MouseLeftButtonDown="OnRetouchMouseDown"
                     MouseMove="OnRetouchMouseMove"
                     MouseLeftButtonUp="OnRetouchMouseUp"
+                    MouseLeave="OnRetouchMouseLeave"
                     Visibility="{Binding IsRetouchMode, Converter={StaticResource BoolToVisibility}}">
               <Canvas.RenderTransform>
                 <ScaleTransform ScaleX="{Binding ZoomFactor}" ScaleY="{Binding ZoomFactor}"
@@ -334,6 +335,37 @@
                          StrokeThickness="1"
                          IsHitTestVisible="False"
                          Visibility="{Binding HasPendingRect, Converter={StaticResource BoolToVisibility}}" />
+
+              <!-- 笔迹预览：用"笔刷粗细的折线"描边，圆头圆角 —— 画出来就是实际涂抹范围，
+                   和滤镜里按"像素到折线距离"算覆盖率的几何完全一致。 -->
+              <Polyline Points="{Binding BrushTrailPoints}"
+                        Stroke="{DynamicResource RetouchMaskStrokeBrush}"
+                        StrokeThickness="{Binding BrushDiameter}"
+                        StrokeLineJoin="Round"
+                        StrokeStartLineCap="Round"
+                        StrokeEndLineCap="Round"
+                        Opacity="0.35"
+                        IsHitTestVisible="False"
+                        Visibility="{Binding HasStrokeTrail, Converter={StaticResource BoolToVisibility}}" />
+
+              <!-- 仿制图章的取源点标记（用 RenderTransform 把圆心对到源点坐标上） -->
+              <Ellipse Canvas.Left="{Binding CloneStampSourceLeft}" Canvas.Top="{Binding CloneStampSourceTop}"
+                       Width="14" Height="14" StrokeThickness="2"
+                       Stroke="{DynamicResource CloneStampSourceBrush}"
+                       IsHitTestVisible="False"
+                       Visibility="{Binding IsCloneStampTool, Converter={StaticResource BoolToVisibility}}">
+                <Ellipse.RenderTransform>
+                  <TranslateTransform X="-7" Y="-7" />
+                </Ellipse.RenderTransform>
+              </Ellipse>
+
+              <!-- 笔刷光标（跟随鼠标，只在仿制图章下显示） -->
+              <Ellipse Canvas.Left="{Binding BrushCursorLeft}" Canvas.Top="{Binding BrushCursorTop}"
+                       Width="{Binding BrushDiameter}" Height="{Binding BrushDiameter}"
+                       StrokeThickness="1"
+                       Stroke="{DynamicResource AccentBrush}"
+                       IsHitTestVisible="False"
+                       Visibility="{Binding IsBrushCursorVisible, Converter={StaticResource BoolToVisibility}}" />
             </Canvas>
           </Grid>
         </ScrollViewer>
@@ -814,11 +846,15 @@
             <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
               <StackPanel Margin="14,12">
 
-                <TextBlock Text="智能填充（消除）" FontSize="14" FontWeight="SemiBold"
+                <TextBlock Text="修补 / 消除" FontSize="14" FontWeight="SemiBold"
                            Foreground="{DynamicResource ChromeForegroundBrush}" />
-                <TextBlock Margin="0,6,0,0" FontSize="11" TextWrapping="Wrap"
-                           Foreground="{DynamicResource SubtleForegroundBrush}"
-                           Text="框住要去掉的水印 / 印章 / 日期戳，系统按周围像素重建该区域。纯色与渐变背景效果最好；纹理背景（草地、织物、人脸）会留下平滑斑块。" />
+
+                <TextBlock Text="工具" Margin="0,8,0,0" Style="{StaticResource StatusLabelStyle}" />
+                <ComboBox SelectedIndex="{Binding RetouchToolIndex, Mode=TwoWay}"
+                          IsEnabled="{Binding HasDocument}">
+                  <ComboBoxItem Content="智能填充（纯色 / 渐变背景）" />
+                  <ComboBoxItem Content="仿制图章（纹理背景手工修）" />
+                </ComboBox>
 
                 <StackPanel Orientation="Horizontal" Margin="0,12,0,0">
                   <Button Content="进入修补模式" Style="{StaticResource ToolbarButtonStyle}"
@@ -839,15 +875,44 @@
 
                 <Rectangle Height="1" Margin="0,16" Fill="{DynamicResource BorderBrush}" />
 
-                <TextBlock Text="操作步骤" FontSize="14" FontWeight="SemiBold"
+                <TextBlock Text="仿制图章" FontSize="14" FontWeight="SemiBold"
                            Foreground="{DynamicResource ChromeForegroundBrush}" />
-                <TextBlock Text="1. 点「进入修补模式」" Margin="0,8,0,0" FontSize="11" TextWrapping="Wrap"
+
+                <DockPanel Margin="0,10,0,0" LastChildFill="False">
+                  <TextBlock DockPanel.Dock="Left" Text="笔刷半径" Style="{StaticResource StatusLabelStyle}" Margin="0" />
+                  <TextBlock DockPanel.Dock="Right" MinWidth="46" TextAlignment="Right"
+                             Style="{StaticResource StatusTextStyle}" Margin="0"
+                             Text="{Binding BrushRadius, StringFormat={}{0:0} px}" />
+                </DockPanel>
+                <Slider Minimum="4" Maximum="120" TickFrequency="8" SmallChange="1" LargeChange="8"
+                        IsEnabled="{Binding HasDocument}"
+                        Value="{Binding BrushRadius, Mode=TwoWay}" />
+
+                <DockPanel Margin="0,10,0,0" LastChildFill="False">
+                  <TextBlock DockPanel.Dock="Left" Text="笔刷硬度" Style="{StaticResource StatusLabelStyle}" Margin="0" />
+                  <TextBlock DockPanel.Dock="Right" MinWidth="46" TextAlignment="Right"
+                             Style="{StaticResource StatusTextStyle}" Margin="0"
+                             Text="{Binding BrushHardnessPercentText}" />
+                </DockPanel>
+                <Slider Minimum="0" Maximum="1" TickFrequency="0.1" SmallChange="0.05" LargeChange="0.1"
+                        IsEnabled="{Binding HasDocument}"
+                        Value="{Binding BrushHardness, Mode=TwoWay}" />
+
+                <TextBlock Text="{Binding ClipCloneStampInfoText}" Margin="0,10,0,0" FontSize="11" TextWrapping="Wrap"
                            Foreground="{DynamicResource SubtleForegroundBrush}" />
-                <TextBlock Text="2. 在画布上拖拽矩形框住要去掉的内容，可连续框选多处" Margin="0,4,0,0" FontSize="11" TextWrapping="Wrap"
+
+                <Rectangle Height="1" Margin="0,16" Fill="{DynamicResource BorderBrush}" />
+
+                <TextBlock Text="能力边界与操作" FontSize="14" FontWeight="SemiBold"
+                           Foreground="{DynamicResource ChromeForegroundBrush}" />
+                <TextBlock Margin="0,8,0,0" FontSize="11" TextWrapping="Wrap"
+                           Foreground="{DynamicResource SubtleForegroundBrush}"
+                           Text="智能填充按周围像素重建，纯色与渐变背景效果最好；纹理背景（草地、织物、人脸）会留下平滑斑块，那种情况请改用仿制图章手动取纹理。" />
+                <TextBlock Text="智能填充：进入模式 → 拖拽矩形框住要去掉的内容（可连续框选）→ 点「智能填充」" Margin="0,8,0,0" FontSize="11" TextWrapping="Wrap"
                            Foreground="{DynamicResource SubtleForegroundBrush}" />
-                <TextBlock Text="3. 点「智能填充」一次性处理" Margin="0,4,0,0" FontSize="11" TextWrapping="Wrap"
+                <TextBlock Text="仿制图章：进入模式 → 按住 Alt 点一下取源 → 在别处拖拽涂抹" Margin="0,4,0,0" FontSize="11" TextWrapping="Wrap"
                            Foreground="{DynamicResource SubtleForegroundBrush}" />
-                <TextBlock Text="填充后可 Ctrl+Z 整体撤销；一次填充只占一步历史" Margin="0,8,0,0" FontSize="11" TextWrapping="Wrap"
+                <TextBlock Text="都可以 Ctrl+Z 撤销；每笔涂抹只保存改动区域的前后像素，内存占用很小" Margin="0,8,0,0" FontSize="11" TextWrapping="Wrap"
                            Foreground="{DynamicResource SubtleForegroundBrush}" />
               </StackPanel>
             </ScrollViewer>
