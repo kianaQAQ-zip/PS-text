@@ -43,6 +43,14 @@
 - PowerShell 的 `[Reflection.Assembly]::LoadFrom` 也被拦截（等同 Add-Type），
   想验证某个静态方法请**改成加一条自检**，别走反射。
 
+## 版本控制与远端（已配置 · 2026-10-07）
+- 远端：`git@github.com:kianaQAQ-zip/PS-text.git`，分支 `main`，SSH 推送，追踪已建立。
+- ⚠️ 远端最初已有一个 `Initial commit`（**MIT LICENSE**，署名 `kianaQAQ`）。若再遇到"远端不是空仓库"，
+  用 `git fetch` + `git rebase origin/main` 接上，**不要 force push**。
+- 提交身份 `kiana / 1440667466@qq.com`；提交前查密钥 `grep -rnE "sk-[A-Za-z0-9]{10}"`。
+- 项目采用 **MIT 许可**（README 尚未提到，可选补充）。
+- 本机「net48 WPF 构建 + 无头自检」工作流已沉淀为技能 `~/.workbuddy/skills/net48-wpf-build-and-selftest/SKILL.md`。
+
 ## 已记录的坑
 - `WmpBitmapEncoder` 是 **JPEG XR（HD Photo）**，不是 WebP；代码注释/属性名 `IsWebP`/README 均为错误表述，已修正为 `IsJpegXr`。
 - 调整预览用降采样 + 防抖提交；`_lastRenderedAdjustments` 与 `_committedAdjustments` 必须分开维护（曾因此丢历史步骤）。
