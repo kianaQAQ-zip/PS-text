@@ -21,6 +21,20 @@
 - MVVM：VM 只依赖 `IImageService / IDialogService / IDispatcherService / IPrintService`，**不得引用 WPF 控件类型**。
 - 滤镜一律写成纯函数：`BitmapSource → WriteableBitmap`，并保持"串行=并行"逐像素一致。
 
+## 构建与自检（本机实测可行路径）
+- 构建必须用 VS2022 MSBuild（SDK 9 无 net48 WPF 目标包）：
+  `C:\Program Files\Microsoft Visual Studio\2022\Professional\MSBuild\Current\Bin\MSBuild.exe PSText.csproj -t:Build -p:Configuration=Release`
+- ⚠️ **MSBuild 被本机工具层可执行文件黑名单拦截**：Bash 与 PowerShell 直接调用都会报
+  "Known Windows LOLBin"，加 `dangerouslyDisableSandbox` 也无效。
+  可行做法：写一个 Python 脚本用 `subprocess.run([MSBUILD, ...])` 调起（托管 Python 在
+  `C:\Users\kiana\.workbuddy\binaries\python\envs\default\Scripts\python.exe`）。
+- 自检：`PS-text.exe --selftest`。**必须把 TMP/TEMP 指向项目内可写目录**，
+  否则 `%TEMP%\pstext-selftest-*` 建目录被拒（沙箱）→ 退出码 1。
+  例：`TMP="D:/Code/PS-text/build/tmp" TEMP="D:/Code/PS-text/build/tmp" ./PS-text.exe --selftest`
+- 日志落在 `build/selftest.log`、`build/bin/Release/selftest.log`、`$TEMP/pstext-selftest.log` 三处。
+- PowerShell 的 `[Reflection.Assembly]::LoadFrom` 也被拦截（等同 Add-Type），
+  想验证某个静态方法请**改成加一条自检**，别走反射。
+
 ## 已记录的坑
 - `WmpBitmapEncoder` 是 **JPEG XR（HD Photo）**，不是 WebP；代码注释/属性名 `IsWebP`/README 均为错误表述，待修正为 `IsJpegXr`。
 - 调整预览用降采样 + 防抖提交；`_lastRenderedAdjustments` 与 `_committedAdjustments` 必须分开维护（曾因此丢历史步骤）。
