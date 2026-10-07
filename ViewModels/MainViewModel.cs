@@ -178,6 +178,9 @@ namespace PSText.ViewModels
             // 尺寸缩放与任意角度旋转命令（见 MainViewModel.Geometry.cs）
             InitializeGeometryCommands();
 
+            // 修补 / 消除（智能填充）命令（见 MainViewModel.Retouch.cs）
+            InitializeRetouchCommands();
+
             // 打印与批量打印命令（见 MainViewModel.Print.cs）
             InitializePrintCommands();
 

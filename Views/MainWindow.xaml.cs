@@ -449,6 +449,12 @@ namespace PSText.Views
                 return;
             }
 
+            // 修补模式下双击是在框选标记，不应该顺带切换缩放
+            if (viewModel.IsRetouchMode)
+            {
+                return;
+            }
+
             // 双击画布：适应窗口 ⇄ 原始大小
             if (viewModel.IsFitToWindow)
             {
@@ -637,6 +643,98 @@ namespace PSText.Views
                     return Cursors.SizeWE;
                 default:
                     return Cursors.SizeAll;
+            }
+        }
+
+        #endregion
+
+        #region 修补标记交互
+
+        /// <summary>
+        /// 把鼠标位置换算成图像像素坐标。
+        /// 修补标记层与图像 1:1（整体随 ZoomFactor 缩放），所以只要除以缩放比即可。
+        /// </summary>
+        private bool TryGetRetouchImagePoint(MouseEventArgs e, out double imageX, out double imageY)
+        {
+            imageX = 0.0;
+            imageY = 0.0;
+
+            MainViewModel viewModel = ViewModel;
+            if (viewModel == null || RetouchOverlay == null)
+            {
+                return false;
+            }
+
+            double zoom = viewModel.ZoomFactor;
+            if (zoom <= 0.0)
+            {
+                return false;
+            }
+
+            Point position = e.GetPosition(RetouchOverlay);
+            imageX = position.X / zoom;
+            imageY = position.Y / zoom;
+            return true;
+        }
+
+        private void OnRetouchMouseDown(object sender, MouseButtonEventArgs e)
+        {
+            MainViewModel viewModel = ViewModel;
+            if (viewModel == null || !viewModel.IsRetouchMode)
+            {
+                return;
+            }
+
+            double imageX;
+            double imageY;
+
+            if (!TryGetRetouchImagePoint(e, out imageX, out imageY))
+            {
+                return;
+            }
+
+            viewModel.BeginRetouchSelect(imageX, imageY);
+            RetouchOverlay.CaptureMouse();
+            e.Handled = true;
+        }
+
+        private void OnRetouchMouseMove(object sender, MouseEventArgs e)
+        {
+            MainViewModel viewModel = ViewModel;
+            if (viewModel == null || !viewModel.IsRetouchMode)
+            {
+                return;
+            }
+
+            if (e.LeftButton != MouseButtonState.Pressed)
+            {
+                return;
+            }
+
+            double imageX;
+            double imageY;
+
+            if (!TryGetRetouchImagePoint(e, out imageX, out imageY))
+            {
+                return;
+            }
+
+            viewModel.UpdateRetouchSelect(imageX, imageY);
+            e.Handled = true;
+        }
+
+        private void OnRetouchMouseUp(object sender, MouseButtonEventArgs e)
+        {
+            MainViewModel viewModel = ViewModel;
+
+            if (viewModel != null)
+            {
+                viewModel.EndRetouchSelect();
+            }
+
+            if (RetouchOverlay != null && Mouse.Captured == RetouchOverlay)
+            {
+                RetouchOverlay.ReleaseMouseCapture();
             }
         }
 

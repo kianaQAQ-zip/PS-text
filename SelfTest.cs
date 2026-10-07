@@ -107,6 +107,8 @@ namespace PSText
                 CheckCrashLogger(ref checks, ref failures, log);
                 CheckMainWindowXaml(ref checks, ref failures, log);
                 CheckResizeAndArbitraryRotation(imageService, pngPath, ref checks, ref failures, log);
+                CheckInpaintFilter(ref checks, ref failures, log);
+                CheckRetouchEndToEnd(imageService, pngPath, ref checks, ref failures, log);
                 log.AppendLine();
             }
             catch (Exception ex)
@@ -3819,11 +3821,14 @@ namespace PSText
                 {
                     // 构造已经失败，分页断言没有意义
                 }
-                else if (declaredTabs < 5 || realizedTabs != declaredTabs || !tabHeaders.Contains("尺寸"))
+                else if (declaredTabs < 6
+                    || realizedTabs != declaredTabs
+                    || !tabHeaders.Contains("尺寸")
+                    || !tabHeaders.Contains("修补"))
                 {
                     failures++;
                     log.AppendLine(string.Format(
-                        "  FAIL 分页不完整（声明 {0} 个，切换 {1} 个，标题：{2}；应含「尺寸」页）",
+                        "  FAIL 分页不完整（声明 {0} 个，切换 {1} 个，标题：{2}；应含「尺寸」与「修补」页）",
                         declaredTabs,
                         realizedTabs,
                         string.Join(" / ", tabHeaders.ToArray())));
@@ -3831,7 +3836,7 @@ namespace PSText
                 else
                 {
                     log.AppendLine(string.Format(
-                        "  OK   {0} 个分页全部可呈现（{1}），含新增的「尺寸」页",
+                        "  OK   {0} 个分页全部可呈现（{1}）",
                         realizedTabs,
                         string.Join(" / ", tabHeaders.ToArray())));
                 }
@@ -4462,6 +4467,573 @@ namespace PSText
             }
 
             log.AppendLine();
+        }
+
+        /// <summary>
+        /// 智能填充（M2 第一块）：验证调和扩散的两个决定性性质。
+        ///
+        /// 这个功能的核心承诺是"填完看不出那里原来有东西"，而它之所以成立，
+        /// 靠的是调和函数的两条数学性质 —— 所以断言直接打在性质上：
+        ///   1. **常值解**：边界同色 ⇒ 填充结果就是那个颜色（纯色背景上的水印被彻底抹掉）；
+        ///   2. **线性重现**：边界是线性渐变 ⇒ 填充结果严格落在同一条渐变线上（扫描件照明不均也能对上）。
+        /// 另外钉住"掩膜外逐字节不变"，避免填充越界改动画面。
+        /// </summary>
+        private static void CheckInpaintFilter(ref int checks, ref int failures, StringBuilder log)
+        {
+            log.AppendLine("[25] 智能填充（调和扩散）");
+
+            try
+            {
+                // ---- 1. 空掩膜必须是逐像素恒等 ----
+                checks++;
+                PixelBuffer original = CreateTestBuffer(64, 48);
+                PixelBuffer untouched = InpaintFilter.Inpaint(original, new byte[64 * 48]);
+
+                if (!PixelsEqual(original.GetPixels(), untouched.GetPixels()))
+                {
+                    failures++;
+                    log.AppendLine("  FAIL 空掩膜改动了像素（应逐像素恒等）");
+                }
+                else
+                {
+                    log.AppendLine("  OK   空掩膜逐像素恒等（不做无谓改动）");
+                }
+
+                // ---- 2. 纯色背景：填充后仍是同一个颜色 ----
+                checks++;
+                int solidWidth = 80;
+                int solidHeight = 60;
+                PixelBuffer solid = CreateSolidBuffer(solidWidth, solidHeight, 214, 231, 245);
+                byte[] solidMask = new byte[solidWidth * solidHeight];
+
+                for (int y = 20; y < 40; y++)
+                {
+                    for (int x = 25; x < 55; x++)
+                    {
+                        solidMask[y * solidWidth + x] = 1;
+                    }
+                }
+
+                PixelBuffer solidFilled = InpaintFilter.Inpaint(solid, solidMask);
+                byte[] solidPixels = solidFilled.GetPixels();
+                int solidBad = 0;
+
+                for (int i = 0; i < solidPixels.Length; i += 4)
+                {
+                    if (solidPixels[i] != 245 || solidPixels[i + 1] != 231
+                        || solidPixels[i + 2] != 214 || solidPixels[i + 3] != 255)
+                    {
+                        solidBad++;
+                    }
+                }
+
+                if (solidBad != 0)
+                {
+                    failures++;
+                    log.AppendLine(string.Format(
+                        "  FAIL 纯色背景填充后出现 {0} 个像素偏离原色（常值解未成立）", solidBad));
+                }
+                else
+                {
+                    log.AppendLine("  OK   纯色背景上的标记被彻底抹平：填充后逐像素等于原背景色");
+                }
+
+                // ---- 3. 线性渐变背景：填充区域必须落在同一条渐变线上 ----
+                checks++;
+                int rampWidth = 80;
+                int rampHeight = 40;
+                PixelBuffer ramp = CreateHorizontalRamp(rampWidth, rampHeight);
+                byte[] rampMask = new byte[rampWidth * rampHeight];
+
+                for (int y = 10; y < 30; y++)
+                {
+                    for (int x = 30; x < 50; x++)
+                    {
+                        rampMask[y * rampWidth + x] = 1;
+                    }
+                }
+
+                PixelBuffer rampFilled = InpaintFilter.Inpaint(ramp, rampMask);
+                byte[] rampPixels = rampFilled.GetPixels();
+                int worstRampError = 0;
+                string worstRampDetail = null;
+
+                for (int y = 10; y < 30; y++)
+                {
+                    for (int x = 30; x < 50; x++)
+                    {
+                        int index = (y * rampWidth + x) * 4;
+
+                        int expectedB = x * 255 / (rampWidth - 1);
+                        int expectedG = (rampWidth - 1 - x) * 255 / (rampWidth - 1);
+
+                        int errorB = Math.Abs(rampPixels[index] - expectedB);
+                        int errorG = Math.Abs(rampPixels[index + 1] - expectedG);
+                        int errorR = Math.Abs(rampPixels[index + 2] - 128);
+                        int error = Math.Max(errorB, Math.Max(errorG, errorR));
+
+                        if (error > worstRampError)
+                        {
+                            worstRampError = error;
+                            worstRampDetail = string.Format(
+                                "({0},{1}) 实际 B{2} G{3} R{4}，期望 B{5} G{6} R128",
+                                x, y, rampPixels[index], rampPixels[index + 1], rampPixels[index + 2],
+                                expectedB, expectedG);
+                        }
+                    }
+                }
+
+                if (worstRampError > 2)
+                {
+                    failures++;
+                    log.AppendLine(string.Format(
+                        "  FAIL 渐变背景填充后偏离原渐变（最大误差 {0}）：{1}",
+                        worstRampError, worstRampDetail));
+                }
+                else
+                {
+                    log.AppendLine(string.Format(
+                        "  OK   渐变背景被精确重现（最大误差 {0} ≤ 2，调和函数重现线性函数）",
+                        worstRampError));
+                }
+
+                // ---- 4. 掩膜外必须逐字节不变 ----
+                checks++;
+                byte[] rampOriginal = ramp.GetPixels();
+                int outsideChanged = 0;
+
+                for (int y = 0; y < rampHeight; y++)
+                {
+                    for (int x = 0; x < rampWidth; x++)
+                    {
+                        if (rampMask[y * rampWidth + x] != 0)
+                        {
+                            continue;
+                        }
+
+                        int index = (y * rampWidth + x) * 4;
+
+                        for (int channel = 0; channel < 4; channel++)
+                        {
+                            if (rampPixels[index + channel] != rampOriginal[index + channel])
+                            {
+                                outsideChanged++;
+                                break;
+                            }
+                        }
+                    }
+                }
+
+                if (outsideChanged != 0)
+                {
+                    failures++;
+                    log.AppendLine(string.Format(
+                        "  FAIL 填充改动了 {0} 个掩膜外的像素（不得越界）", outsideChanged));
+                }
+                else
+                {
+                    log.AppendLine("  OK   掩膜外像素逐字节不变（填充严格限定在标记范围内）");
+                }
+
+                // ---- 5. 掩膜覆盖整幅图（没有边界数据）也不能崩 ----
+                checks++;
+                PixelBuffer whole = CreateTestBuffer(32, 24);
+                byte[] wholeMask = new byte[32 * 24];
+
+                for (int i = 0; i < wholeMask.Length; i++)
+                {
+                    wholeMask[i] = 1;
+                }
+
+                PixelBuffer wholeFilled = InpaintFilter.Inpaint(whole, wholeMask);
+                byte[] wholePixels = wholeFilled.GetPixels();
+                byte[] wholeSource = whole.GetPixels();
+                int lowest = 255;
+                int highest = 0;
+
+                for (int i = 0; i < wholeSource.Length; i++)
+                {
+                    lowest = wholeSource[i] < lowest ? wholeSource[i] : lowest;
+                    highest = wholeSource[i] > highest ? wholeSource[i] : highest;
+                }
+
+                bool inRange = true;
+
+                for (int i = 0; i < wholePixels.Length; i++)
+                {
+                    if (wholePixels[i] < lowest || wholePixels[i] > highest)
+                    {
+                        inRange = false;
+                        break;
+                    }
+                }
+
+                if (!inRange)
+                {
+                    failures++;
+                    log.AppendLine("  FAIL 全图标记时结果越出了原图的取值范围");
+                }
+                else
+                {
+                    log.AppendLine("  OK   全图标记（无边界数据）不崩溃，且结果落在原图取值范围内");
+                }
+
+                // ---- 6. 面积上限判定（防止大图整幅标记时把内存打爆） ----
+                checks++;
+                bool smallSolvable = InpaintFilter.IsSolvable(300, 120);
+                bool hugeSolvable = InpaintFilter.IsSolvable(4000, 3000);
+
+                if (!smallSolvable || hugeSolvable)
+                {
+                    failures++;
+                    log.AppendLine(string.Format(
+                        "  FAIL 面积上限判定异常（300×120 → {0}，4000×3000 → {1}）",
+                        smallSolvable, hugeSolvable));
+                }
+                else
+                {
+                    log.AppendLine("  OK   面积上限判定正确（300×120 可处理，4000×3000 拒绝）");
+                }
+
+                // ---- 7. 性能（只做粗上限，防止算法退化成不可用） ----
+                checks++;
+                int perfWidth = 1200;
+                int perfHeight = 800;
+                PixelBuffer perfSource = CreateTestBuffer(perfWidth, perfHeight);
+                byte[] perfMask = new byte[perfWidth * perfHeight];
+
+                for (int y = 300; y < 420; y++)
+                {
+                    for (int x = 400; x < 700; x++)
+                    {
+                        perfMask[y * perfWidth + x] = 1;
+                    }
+                }
+
+                System.Diagnostics.Stopwatch watch = System.Diagnostics.Stopwatch.StartNew();
+                InpaintFilter.Inpaint(perfSource, perfMask);
+                watch.Stop();
+
+                if (watch.ElapsedMilliseconds > 5000)
+                {
+                    failures++;
+                    log.AppendLine(string.Format(
+                        "  FAIL 智能填充过慢：{0}×{1} 图上填充 300×120 区域耗时 {2} ms",
+                        perfWidth, perfHeight, watch.ElapsedMilliseconds));
+                }
+                else
+                {
+                    log.AppendLine(string.Format(
+                        "  OK   性能：{0}×{1} 图上填充 300×120 区域耗时 {2} ms",
+                        perfWidth, perfHeight, watch.ElapsedMilliseconds));
+                }
+            }
+            catch (Exception ex)
+            {
+                failures++;
+                log.AppendLine("  FAIL 智能填充测试异常: " + ex.GetType().Name + " " + ex.Message);
+            }
+
+            log.AppendLine();
+        }
+
+        /// <summary>
+        /// 修补模式端到端（M2 第一块）：标记叠加、增量计数、填充提交、像素级撤销、换图自动丢弃标记。
+        /// </summary>
+        private static void CheckRetouchEndToEnd(
+            IImageService imageService,
+            string imagePath,
+            ref int checks,
+            ref int failures,
+            StringBuilder log)
+        {
+            log.AppendLine("[26] 修补模式端到端（标记 / 填充 / 撤销）");
+
+            try
+            {
+                MainViewModel viewModel = new MainViewModel(
+                    imageService,
+                    new NullDialogService(),
+                    new ImmediateDispatcherService());
+
+                viewModel.LoadFromPathAsync(imagePath).GetAwaiter().GetResult();
+
+                checks++;
+
+                if (!viewModel.HasDocument)
+                {
+                    failures++;
+                    log.AppendLine("  FAIL 未能加载测试图片，跳过修补部分");
+                    log.AppendLine();
+                    return;
+                }
+
+                // ---- 未进入修补模式时不允许填充 ----
+                checks++;
+
+                if (viewModel.CanApplyInpaint || viewModel.ApplyInpaintCommand.CanExecute(null))
+                {
+                    failures++;
+                    log.AppendLine("  FAIL 未进入修补模式时「智能填充」应为不可用");
+                }
+                else
+                {
+                    log.AppendLine("  OK   未进入修补模式时「智能填充」不可用");
+                }
+
+                // ---- 进入修补模式 ----
+                checks++;
+                viewModel.BeginRetouchCommand.Execute(null);
+
+                if (!viewModel.IsRetouchMode)
+                {
+                    failures++;
+                    log.AppendLine("  FAIL 未能进入修补模式");
+                    log.AppendLine();
+                    return;
+                }
+
+                log.AppendLine("  OK   进入修补模式");
+
+                // ---- 拖拽出第一处标记：50 × 30 = 1500 像素 ----
+                checks++;
+                viewModel.BeginRetouchSelect(10.0, 10.0);
+                viewModel.UpdateRetouchSelect(60.0, 40.0);
+                viewModel.EndRetouchSelect();
+
+                if (viewModel.RetouchMarkCount != 1 || viewModel.RetouchMaskPixels != 1500)
+                {
+                    failures++;
+                    log.AppendLine(string.Format(
+                        "  FAIL 第一处标记异常（{0} 处，{1} 像素，期望 1 处 / 1500 像素）",
+                        viewModel.RetouchMarkCount, viewModel.RetouchMaskPixels));
+                }
+                else
+                {
+                    log.AppendLine("  OK   拖拽框选生效：1 处标记、1500 像素（50 × 30）");
+                }
+
+                // ---- 第二处标记叠加 ----
+                checks++;
+                viewModel.BeginRetouchSelect(100.0, 100.0);
+                viewModel.UpdateRetouchSelect(140.0, 130.0);
+                viewModel.EndRetouchSelect();
+
+                long expectedTotal = 1500 + 40 * 30;
+
+                if (viewModel.RetouchMarkCount != 2 || viewModel.RetouchMaskPixels != expectedTotal)
+                {
+                    failures++;
+                    log.AppendLine(string.Format(
+                        "  FAIL 第二处标记叠加异常（{0} 处，{1} 像素，期望 2 处 / {2} 像素）",
+                        viewModel.RetouchMarkCount, viewModel.RetouchMaskPixels, expectedTotal));
+                }
+                else
+                {
+                    log.AppendLine(string.Format("  OK   标记可叠加：2 处、{0} 像素", expectedTotal));
+                }
+
+                // ---- 重叠标记不能重复计数（要重建的是并集） ----
+                checks++;
+                viewModel.BeginRetouchSelect(20.0, 20.0);
+                viewModel.UpdateRetouchSelect(40.0, 30.0);
+                viewModel.EndRetouchSelect();
+
+                if (viewModel.RetouchMaskPixels != expectedTotal)
+                {
+                    failures++;
+                    log.AppendLine(string.Format(
+                        "  FAIL 重叠标记被重复计数（{0} 像素，应仍为 {1}）",
+                        viewModel.RetouchMaskPixels, expectedTotal));
+                }
+                else
+                {
+                    log.AppendLine("  OK   重叠标记按并集计数（重复框选不会虚增面积）");
+                }
+
+                // ---- 太小的矩形应被忽略 ----
+                checks++;
+                int marksBefore = viewModel.RetouchMarkCount;
+                viewModel.BeginRetouchSelect(200.0, 150.0);
+                viewModel.UpdateRetouchSelect(200.5, 150.5);
+                viewModel.EndRetouchSelect();
+
+                if (viewModel.RetouchMarkCount != marksBefore)
+                {
+                    failures++;
+                    log.AppendLine("  FAIL 过小的矩形未被忽略（多半是误点）");
+                }
+                else
+                {
+                    log.AppendLine("  OK   过小的矩形被忽略（避免误点产生无意义标记）");
+                }
+
+                // ---- 执行填充 ----
+                checks++;
+                PixelBuffer beforeFill = PixelBuffer.FromBitmap(viewModel.Document.Bitmap);
+                int documentWidth = viewModel.Document.PixelWidth;
+                int documentHeight = viewModel.Document.PixelHeight;
+
+                if (!viewModel.ApplyInpaintCommand.CanExecute(null))
+                {
+                    failures++;
+                    log.AppendLine("  FAIL 有标记时「智能填充」应可执行");
+                }
+
+                viewModel.ApplyInpaintCommand.Execute(null);
+                WaitForIdle(viewModel);
+
+                PixelBuffer afterFill = PixelBuffer.FromBitmap(viewModel.Document.Bitmap);
+
+                bool sizeKept = viewModel.Document.PixelWidth == documentWidth
+                                && viewModel.Document.PixelHeight == documentHeight;
+                bool maskCleared = !viewModel.HasRetouchMask && viewModel.RetouchMarkCount == 0;
+
+                if (!sizeKept || !maskCleared)
+                {
+                    failures++;
+                    log.AppendLine(string.Format(
+                        "  FAIL 填充后状态异常（尺寸保持 {0}，标记已清 {1}）", sizeKept, maskCleared));
+                }
+                else
+                {
+                    log.AppendLine("  OK   填充完成：画布尺寸不变、标记自动清除");
+                }
+
+                // ---- 填充只改标记内的像素 ----
+                checks++;
+                int changedInside = 0;
+                int changedOutside = 0;
+                byte[] beforePixels = beforeFill.GetPixels();
+                byte[] afterPixels = afterFill.GetPixels();
+
+                for (int y = 0; y < documentHeight; y++)
+                {
+                    for (int x = 0; x < documentWidth; x++)
+                    {
+                        int index = (y * documentWidth + x) * 4;
+                        bool inside =
+                            (x >= 10 && x < 60 && y >= 10 && y < 40)
+                            || (x >= 100 && x < 140 && y >= 100 && y < 130);
+
+                        bool differs = false;
+
+                        for (int channel = 0; channel < 4; channel++)
+                        {
+                            if (beforePixels[index + channel] != afterPixels[index + channel])
+                            {
+                                differs = true;
+                                break;
+                            }
+                        }
+
+                        if (!differs)
+                        {
+                            continue;
+                        }
+
+                        if (inside)
+                        {
+                            changedInside++;
+                        }
+                        else
+                        {
+                            changedOutside++;
+                        }
+                    }
+                }
+
+                if (changedOutside != 0 || changedInside == 0)
+                {
+                    failures++;
+                    log.AppendLine(string.Format(
+                        "  FAIL 填充范围不对（标记内改动 {0} 像素，标记外改动 {1} 像素）",
+                        changedInside, changedOutside));
+                }
+                else
+                {
+                    log.AppendLine(string.Format(
+                        "  OK   填充范围精确：标记内改动 {0} 像素、标记外 0 改动", changedInside));
+                }
+
+                // ---- 撤销必须逐像素恢复 ----
+                checks++;
+                viewModel.UndoCommand.Execute(null);
+                WaitForIdle(viewModel);
+
+                PixelBuffer undone = PixelBuffer.FromBitmap(viewModel.Document.Bitmap);
+
+                if (!PixelsEqual(beforePixels, undone.GetPixels()))
+                {
+                    failures++;
+                    log.AppendLine("  FAIL 撤销未逐像素恢复填充前的画面");
+                }
+                else
+                {
+                    log.AppendLine("  OK   撤销逐像素恢复（一次填充 = 一步历史）");
+                }
+
+                // ---- 画布尺寸变化时标记要自动丢弃 ----
+                checks++;
+                viewModel.BeginRetouchSelect(10.0, 10.0);
+                viewModel.UpdateRetouchSelect(30.0, 25.0);
+                viewModel.EndRetouchSelect();
+
+                bool markedBeforeResize = viewModel.HasRetouchMask;
+
+                viewModel.ResizeUnitIndex = 0;
+                viewModel.LockAspectRatio = true;
+                viewModel.ResizeTargetWidth = 160.0;
+                viewModel.ApplyResizeCommand.Execute(null);
+                WaitForIdle(viewModel);
+
+                if (!markedBeforeResize)
+                {
+                    failures++;
+                    log.AppendLine("  FAIL 缩放前未能建立标记");
+                }
+                else if (viewModel.HasRetouchMask || viewModel.RetouchMarkCount != 0)
+                {
+                    failures++;
+                    log.AppendLine(string.Format(
+                        "  FAIL 画布尺寸变化后标记未丢弃（仍有 {0} 处）", viewModel.RetouchMarkCount));
+                }
+                else
+                {
+                    log.AppendLine("  OK   画布尺寸变化后自动丢弃标记（旧坐标对新画面无意义）");
+                }
+            }
+            catch (Exception ex)
+            {
+                failures++;
+                log.AppendLine("  FAIL 修补端到端测试异常: " + ex.GetType().Name + " " + ex.Message);
+            }
+
+            log.AppendLine();
+        }
+
+        /// <summary>
+        /// 横向渐变测试图：B 通道从左到右递增、G 通道递减、R 固定 128。
+        /// 三个通道走势不同，因此可以顺带抓出通道顺序写反的问题。
+        /// </summary>
+        private static PixelBuffer CreateHorizontalRamp(int width, int height)
+        {
+            byte[] pixels = new byte[width * height * 4];
+
+            for (int y = 0; y < height; y++)
+            {
+                for (int x = 0; x < width; x++)
+                {
+                    int index = (y * width + x) * 4;
+
+                    pixels[index] = (byte)(x * 255 / Math.Max(1, width - 1));
+                    pixels[index + 1] = (byte)((width - 1 - x) * 255 / Math.Max(1, width - 1));
+                    pixels[index + 2] = 128;
+                    pixels[index + 3] = 255;
+                }
+            }
+
+            return new PixelBuffer(pixels, width, height);
         }
 
         /// <summary>黑 / 白相间的竖条纹（用于检验降采样是否把细纹平滑掉）。</summary>

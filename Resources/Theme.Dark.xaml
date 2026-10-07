@@ -30,6 +30,10 @@
   <SolidColorBrush x:Key="OverlayBrush" Color="#B2000000" />
   <SolidColorBrush x:Key="CropMaskBrush" Color="#AA000000" />
 
+  <!-- 修补标记（红色半透明，两套主题共用同一组值：标记必须一眼可见） -->
+  <SolidColorBrush x:Key="RetouchMaskFillBrush" Color="#44E24B4A" />
+  <SolidColorBrush x:Key="RetouchMaskStrokeBrush" Color="#FFE24B4A" />
+
   <!-- 棋盘格（深色主题用深灰） -->
   <SolidColorBrush x:Key="CheckerLightBrush" Color="#FF565656" />
   <SolidColorBrush x:Key="CheckerDarkBrush" Color="#FF4A4A4A" />

@@ -188,6 +188,7 @@
     <Compile Include="Services\Filters\BlurFilters.cs" />
     <Compile Include="Services\Filters\GeometryFilters.cs" />
     <Compile Include="Services\Filters\Resampler.cs" />
+    <Compile Include="Services\Filters\InpaintFilter.cs" />
     <Compile Include="Services\Filters\BorderFilters.cs" />
     <Compile Include="Services\Filters\TextOverlayFilter.cs" />
   </ItemGroup>
@@ -199,6 +200,7 @@
     <Compile Include="ViewModels\MainViewModel.Filters.cs" />
     <Compile Include="ViewModels\MainViewModel.Crop.cs" />
     <Compile Include="ViewModels\MainViewModel.Geometry.cs" />
+    <Compile Include="ViewModels\MainViewModel.Retouch.cs" />
     <Compile Include="ViewModels\MainViewModel.Print.cs" />
     <Compile Include="ViewModels\MainViewModel.Settings.cs" />
     <Compile Include="ViewModels\PrintPreviewViewModel.cs" />

@@ -284,6 +284,57 @@
                     X2="{Binding CropWidth}" Y2="{Binding CropTwoThirdY1}"
                     Stroke="{DynamicResource GuideBrush}" StrokeThickness="1" IsHitTestVisible="False" />
             </Canvas>
+
+            <!-- ==================== 修补标记层 ====================
+                 与裁剪层同理：尺寸与图像 1:1，整体随缩放放大，因此内部坐标即图像像素坐标。 -->
+            <Canvas x:Name="RetouchOverlay"
+                    Width="{Binding ImagePixelWidth}"
+                    Height="{Binding ImagePixelHeight}"
+                    HorizontalAlignment="Center"
+                    VerticalAlignment="Center"
+                    Background="Transparent"
+                    Cursor="Cross"
+                    MouseLeftButtonDown="OnRetouchMouseDown"
+                    MouseMove="OnRetouchMouseMove"
+                    MouseLeftButtonUp="OnRetouchMouseUp"
+                    Visibility="{Binding IsRetouchMode, Converter={StaticResource BoolToVisibility}}">
+              <Canvas.RenderTransform>
+                <ScaleTransform ScaleX="{Binding ZoomFactor}" ScaleY="{Binding ZoomFactor}"
+                                CenterX="0" CenterY="0" />
+              </Canvas.RenderTransform>
+
+              <!-- 已提交的标记（可连续框选，逐个叠加显示） -->
+              <ItemsControl ItemsSource="{Binding RetouchRects}" IsHitTestVisible="False">
+                <ItemsControl.ItemsPanel>
+                  <ItemsPanelTemplate>
+                    <Canvas />
+                  </ItemsPanelTemplate>
+                </ItemsControl.ItemsPanel>
+                <ItemsControl.ItemContainerStyle>
+                  <Style TargetType="ContentPresenter">
+                    <Setter Property="Canvas.Left" Value="{Binding X}" />
+                    <Setter Property="Canvas.Top" Value="{Binding Y}" />
+                  </Style>
+                </ItemsControl.ItemContainerStyle>
+                <ItemsControl.ItemTemplate>
+                  <DataTemplate>
+                    <Rectangle Width="{Binding Width}" Height="{Binding Height}"
+                               Fill="{DynamicResource RetouchMaskFillBrush}"
+                               Stroke="{DynamicResource RetouchMaskStrokeBrush}"
+                               StrokeThickness="1" />
+                  </DataTemplate>
+                </ItemsControl.ItemTemplate>
+              </ItemsControl>
+
+              <!-- 正在拖拽的矩形（实时预览） -->
+              <Rectangle Canvas.Left="{Binding PendingRect.X}" Canvas.Top="{Binding PendingRect.Y}"
+                         Width="{Binding PendingRect.Width}" Height="{Binding PendingRect.Height}"
+                         Fill="{DynamicResource RetouchMaskFillBrush}"
+                         Stroke="{DynamicResource RetouchMaskStrokeBrush}"
+                         StrokeThickness="1"
+                         IsHitTestVisible="False"
+                         Visibility="{Binding HasPendingRect, Converter={StaticResource BoolToVisibility}}" />
+            </Canvas>
           </Grid>
         </ScrollViewer>
       </Grid>
@@ -754,6 +805,50 @@
                 <Button Content="应用旋转" Style="{StaticResource ToolbarButtonStyle}"
                         Margin="0,10,0,0" HorizontalAlignment="Left"
                         Command="{Binding ApplyRotationCommand}" />
+              </StackPanel>
+            </ScrollViewer>
+          </TabItem>
+
+          <!-- ==================== 修补 ==================== -->
+          <TabItem Header="修补">
+            <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+              <StackPanel Margin="14,12">
+
+                <TextBlock Text="智能填充（消除）" FontSize="14" FontWeight="SemiBold"
+                           Foreground="{DynamicResource ChromeForegroundBrush}" />
+                <TextBlock Margin="0,6,0,0" FontSize="11" TextWrapping="Wrap"
+                           Foreground="{DynamicResource SubtleForegroundBrush}"
+                           Text="框住要去掉的水印 / 印章 / 日期戳，系统按周围像素重建该区域。纯色与渐变背景效果最好；纹理背景（草地、织物、人脸）会留下平滑斑块。" />
+
+                <StackPanel Orientation="Horizontal" Margin="0,12,0,0">
+                  <Button Content="进入修补模式" Style="{StaticResource ToolbarButtonStyle}"
+                          Command="{Binding BeginRetouchCommand}" />
+                  <Button Content="退出" Style="{StaticResource ToolbarButtonStyle}"
+                          Command="{Binding ExitRetouchCommand}" />
+                </StackPanel>
+
+                <TextBlock Text="{Binding RetouchInfoText}" Margin="0,12,0,0" FontSize="11" TextWrapping="Wrap"
+                           Foreground="{DynamicResource SubtleForegroundBrush}" />
+
+                <Button Content="智能填充" Style="{StaticResource ToolbarButtonStyle}"
+                        Margin="0,10,0,0" HorizontalAlignment="Left"
+                        Command="{Binding ApplyInpaintCommand}" />
+                <Button Content="清除标记" Style="{StaticResource ToolbarButtonStyle}"
+                        Margin="0,8,0,0" HorizontalAlignment="Left"
+                        Command="{Binding ClearRetouchMaskCommand}" />
+
+                <Rectangle Height="1" Margin="0,16" Fill="{DynamicResource BorderBrush}" />
+
+                <TextBlock Text="操作步骤" FontSize="14" FontWeight="SemiBold"
+                           Foreground="{DynamicResource ChromeForegroundBrush}" />
+                <TextBlock Text="1. 点「进入修补模式」" Margin="0,8,0,0" FontSize="11" TextWrapping="Wrap"
+                           Foreground="{DynamicResource SubtleForegroundBrush}" />
+                <TextBlock Text="2. 在画布上拖拽矩形框住要去掉的内容，可连续框选多处" Margin="0,4,0,0" FontSize="11" TextWrapping="Wrap"
+                           Foreground="{DynamicResource SubtleForegroundBrush}" />
+                <TextBlock Text="3. 点「智能填充」一次性处理" Margin="0,4,0,0" FontSize="11" TextWrapping="Wrap"
+                           Foreground="{DynamicResource SubtleForegroundBrush}" />
+                <TextBlock Text="填充后可 Ctrl+Z 整体撤销；一次填充只占一步历史" Margin="0,8,0,0" FontSize="11" TextWrapping="Wrap"
+                           Foreground="{DynamicResource SubtleForegroundBrush}" />
               </StackPanel>
             </ScrollViewer>
           </TabItem>
