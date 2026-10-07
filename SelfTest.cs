@@ -106,6 +106,7 @@ namespace PSText
                 CheckProgressReporter(ref checks, ref failures, log);
                 CheckCrashLogger(ref checks, ref failures, log);
                 CheckMainWindowXaml(ref checks, ref failures, log);
+                CheckResizeAndArbitraryRotation(imageService, pngPath, ref checks, ref failures, log);
                 log.AppendLine();
             }
             catch (Exception ex)
@@ -3730,6 +3731,9 @@ namespace PSText
 
                 Exception windowError = null;
                 bool iconLoaded = false;
+                int realizedTabs = 0;
+                int declaredTabs = 0;
+                List<string> tabHeaders = new List<string>();
 
                 // Window 是 DispatcherObject，而自检跑在普通线程上（没有消息循环）。
                 System.Windows.Threading.Dispatcher.CurrentDispatcher.Invoke(
@@ -3745,6 +3749,37 @@ namespace PSText
                             window.UpdateLayout();
 
                             iconLoaded = window.Icon != null;
+
+                            // 找出分页控件并逐个切换（走逻辑树：窗口未 Show 时可视树还没建立，
+                            // 但逻辑树在 XAML 解析后就已经完整了）。
+                            System.Windows.Controls.TabControl tabs =
+                                FindInLogicalTree<System.Windows.Controls.TabControl>(window);
+
+                            if (tabs != null)
+                            {
+                                declaredTabs = tabs.Items.Count;
+                                tabHeaders = new List<string>();
+
+                                foreach (object item in tabs.Items)
+                                {
+                                    System.Windows.Controls.TabItem tabItem =
+                                        item as System.Windows.Controls.TabItem;
+
+                                    if (tabItem != null && tabItem.Header != null)
+                                    {
+                                        tabHeaders.Add(tabItem.Header.ToString());
+                                    }
+                                }
+
+                                // 切一遍所有分页并强制布局（转换器 / 绑定若在呈现时抛异常会被这里抓到）
+                                for (int i = 0; i < declaredTabs; i++)
+                                {
+                                    tabs.SelectedIndex = i;
+                                    window.UpdateLayout();
+                                    realizedTabs++;
+                                }
+                            }
+
                             window.Close();
                         }
                         catch (Exception ex)
@@ -3777,6 +3812,29 @@ namespace PSText
                 {
                     log.AppendLine("  OK   窗口图标已由 pack URI 成功加载");
                 }
+
+                checks++;
+
+                if (windowError != null)
+                {
+                    // 构造已经失败，分页断言没有意义
+                }
+                else if (declaredTabs < 5 || realizedTabs != declaredTabs || !tabHeaders.Contains("尺寸"))
+                {
+                    failures++;
+                    log.AppendLine(string.Format(
+                        "  FAIL 分页不完整（声明 {0} 个，切换 {1} 个，标题：{2}；应含「尺寸」页）",
+                        declaredTabs,
+                        realizedTabs,
+                        string.Join(" / ", tabHeaders.ToArray())));
+                }
+                else
+                {
+                    log.AppendLine(string.Format(
+                        "  OK   {0} 个分页全部可呈现（{1}），含新增的「尺寸」页",
+                        realizedTabs,
+                        string.Join(" / ", tabHeaders.ToArray())));
+                }
             }
             catch (Exception ex)
             {
@@ -3785,6 +3843,672 @@ namespace PSText
             }
 
             log.AppendLine();
+        }
+
+        /// <summary>
+        /// 在**逻辑树**里查找第一个指定类型的后代。
+        ///
+        /// 为什么不用 VisualTreeHelper：窗口在自检里不会被 Show()，此时可视树尚未建立
+        /// （Window 的模板要在创建 HwndSource 后才展开），而逻辑树在 XAML 解析完成后就是完整的。
+        /// </summary>
+        private static T FindInLogicalTree<T>(System.Windows.DependencyObject root)
+            where T : System.Windows.DependencyObject
+        {
+            if (root == null)
+            {
+                return null;
+            }
+
+            if (root is T)
+            {
+                return (T)root;
+            }
+
+            System.Collections.IEnumerable children;
+
+            try
+            {
+                children = System.Windows.LogicalTreeHelper.GetChildren(root);
+            }
+            catch (Exception)
+            {
+                // 个别节点（非 FrameworkElement）取子节点会抛异常，跳过即可。
+                return null;
+            }
+
+            if (children == null)
+            {
+                return null;
+            }
+
+            foreach (object child in children)
+            {
+                System.Windows.DependencyObject node = child as System.Windows.DependencyObject;
+
+                if (node == null)
+                {
+                    continue;
+                }
+
+                T found = FindInLogicalTree<T>(node);
+
+                if (found != null)
+                {
+                    return found;
+                }
+            }
+
+            return null;
+        }
+
+        /// <summary>
+        /// 图像尺寸缩放与任意角度旋转（M1）。
+        ///
+        /// 重点钉住三类容易悄悄出错的点：
+        ///   1. **权重归一化**：纯色图任意缩放后颜色必须不变（不归一化会让图整体变亮 / 变暗）；
+        ///   2. **核展宽**：缩小 10 倍后 1px 竖条纹必须被平滑成均匀灰（不展宽就是摩尔纹）；
+        ///   3. **预乘 alpha**：透明边缘不得被"看不见的黑"拉暗（否则透明图缩放后出现黑边）。
+        /// 另外还有"自动裁掉空白角"这个几何结论：裁完之后**一个背景色像素都不该存在**。
+        /// </summary>
+        private static void CheckResizeAndArbitraryRotation(
+            IImageService imageService,
+            string imagePath,
+            ref int checks,
+            ref int failures,
+            StringBuilder log)
+        {
+            log.AppendLine("[24] 图像尺寸缩放 / 任意角度旋转（M1）");
+
+            try
+            {
+                GeometryFilters geometry = new GeometryFilters();
+
+                // ---- 1. 缩放后的尺寸与行距 ----
+                checks++;
+                PixelBuffer scaleSource = CreateSolidBuffer(400, 300, 40, 90, 200);
+                PixelBuffer half = geometry.Resize(scaleSource, 200, 150, ResampleKernel.Bicubic);
+
+                if (half.Width != 200 || half.Height != 150 || half.Stride != 200 * 4)
+                {
+                    failures++;
+                    log.AppendLine(string.Format(
+                        "  FAIL 缩放尺寸 / 行距错误（{0}×{1}，行距 {2}）", half.Width, half.Height, half.Stride));
+                }
+                else
+                {
+                    log.AppendLine("  OK   缩放尺寸与行距正确（400×300 → 200×150）");
+                }
+
+                // ---- 2. 同尺寸缩放必须逐像素恒等 ----
+                checks++;
+                PixelBuffer identitySource = CreateTestBuffer(64, 48);
+                PixelBuffer identity = geometry.Resize(identitySource, 64, 48, ResampleKernel.Bicubic);
+
+                if (!PixelsEqual(identitySource.GetPixels(), identity.GetPixels()))
+                {
+                    failures++;
+                    log.AppendLine("  FAIL 同尺寸缩放改变了像素（应逐像素恒等）");
+                }
+                else
+                {
+                    log.AppendLine("  OK   同尺寸缩放逐像素恒等（不引入插值误差）");
+                }
+
+                // ---- 3. 纯色图在三档核 × 放大缩放下颜色完全不变 ----
+                checks++;
+                ResampleKernel[] kernels = { ResampleKernel.Bicubic, ResampleKernel.Bilinear, ResampleKernel.NearestNeighbor };
+                int[][] targetSizes = { new int[] { 37, 23 }, new int[] { 311, 157 }, new int[] { 800, 600 } };
+                string colorError = null;
+
+                for (int k = 0; k < kernels.Length && colorError == null; k++)
+                {
+                    for (int s = 0; s < targetSizes.Length; s++)
+                    {
+                        PixelBuffer solid = CreateSolidBuffer(64, 48, 40, 90, 200);
+                        PixelBuffer scaled = geometry.Resize(solid, targetSizes[s][0], targetSizes[s][1], kernels[k]);
+                        byte[] scaledPixels = scaled.GetPixels();
+
+                        for (int i = 0; i < scaledPixels.Length; i += 4)
+                        {
+                            if (scaledPixels[i] != 200 || scaledPixels[i + 1] != 90
+                                || scaledPixels[i + 2] != 40 || scaledPixels[i + 3] != 255)
+                            {
+                                colorError = string.Format(
+                                    "核 {0} → {1}×{2} 时第 {3} 字节为 {4}",
+                                    kernels[k], targetSizes[s][0], targetSizes[s][1], i, scaledPixels[i]);
+                                break;
+                            }
+                        }
+
+                        if (colorError != null)
+                        {
+                            break;
+                        }
+                    }
+                }
+
+                if (colorError != null)
+                {
+                    failures++;
+                    log.AppendLine("  FAIL 纯色图缩放后颜色改变：" + colorError);
+                }
+                else
+                {
+                    log.AppendLine("  OK   纯色图在 3 档插值 × 放大/缩小 下颜色完全不变（权重已归一化）");
+                }
+
+                // ---- 4. 邻近整数倍放大是严格的像素复制 ----
+                checks++;
+                PixelBuffer tiny = CreateTestBuffer(32, 24);
+                PixelBuffer magnified = geometry.Resize(tiny, 64, 48, ResampleKernel.NearestNeighbor);
+                bool nearestExact = magnified.Width == 64 && magnified.Height == 48;
+
+                for (int y = 0; y < 48 && nearestExact; y++)
+                {
+                    for (int x = 0; x < 64; x++)
+                    {
+                        byte[] expected = CopyPixel(tiny, x / 2, y / 2);
+                        byte[] actual = CopyPixel(magnified, x, y);
+
+                        if (actual[0] != expected[0] || actual[1] != expected[1]
+                            || actual[2] != expected[2] || actual[3] != expected[3])
+                        {
+                            nearestExact = false;
+                            break;
+                        }
+                    }
+                }
+
+                if (!nearestExact)
+                {
+                    failures++;
+                    log.AppendLine("  FAIL 邻近 2 倍放大不是严格的像素复制");
+                }
+                else
+                {
+                    log.AppendLine("  OK   邻近 2 倍放大为严格像素复制（每个源像素恰好复制成 2×2 块）");
+                }
+
+                // ---- 5. 缩小 10 倍必须抗混叠（三次立方平滑，邻近取样丢信息） ----
+                // 这是"核展宽"最直接的证据：200px 的 1px 黑白竖条纹缩到 20px，
+                // 正确做法是把每 5 黑 + 5 白平均成中灰；若只抽点取样，会整片变成纯黑。
+                checks++;
+                PixelBuffer stripes = CreateStripedBuffer(200, 20, 1);
+                PixelBuffer smoothed = geometry.Resize(stripes, 20, 20, ResampleKernel.Bicubic);
+                PixelBuffer naive = geometry.Resize(stripes, 20, 20, ResampleKernel.NearestNeighbor);
+
+                byte[] smoothedPixels = smoothed.GetPixels();
+                int smoothMin = 255;
+                int smoothMax = 0;
+
+                for (int i = 0; i < smoothedPixels.Length; i += 4)
+                {
+                    int gray = smoothedPixels[i];
+                    smoothMin = gray < smoothMin ? gray : smoothMin;
+                    smoothMax = gray > smoothMax ? gray : smoothMax;
+                }
+
+                byte[] naivePixels = naive.GetPixels();
+                int naiveMax = 0;
+
+                for (int i = 0; i < naivePixels.Length; i += 4)
+                {
+                    naiveMax = naivePixels[i] > naiveMax ? naivePixels[i] : naiveMax;
+                }
+
+                bool antiAliased = smoothMin >= 100 && smoothMax <= 160;
+                bool naiveLostDetail = naiveMax <= 20;
+
+                if (!antiAliased)
+                {
+                    failures++;
+                    log.AppendLine(string.Format(
+                        "  FAIL 缩小 10 倍后未得到均匀中灰（灰度 {0}~{1}），核可能未展宽",
+                        smoothMin, smoothMax));
+                }
+                else if (!naiveLostDetail)
+                {
+                    failures++;
+                    log.AppendLine(string.Format(
+                        "  FAIL 邻近取样的对照组预期应丢失全部细节（实际最大灰度 {0}）", naiveMax));
+                }
+                else
+                {
+                    log.AppendLine(string.Format(
+                        "  OK   缩小 10 倍抗混叠生效：三次立方 {0}~{1}（≈中灰 127），"
+                        + "对照组邻近取样整片变纯黑（最大 {2}）——核展宽的差别一目了然",
+                        smoothMin, smoothMax, naiveMax));
+                }
+
+                // ---- 6. 透明边缘不得产生黑边（预乘 alpha） ----
+                checks++;
+                PixelBuffer transparentEdge = CreateHalfTransparentBuffer(80, 20);
+                PixelBuffer blended = geometry.Resize(transparentEdge, 40, 20, ResampleKernel.Bicubic);
+                byte[] blendedPixels = blended.GetPixels();
+                int darkestRed = 255;
+                int lowestAlpha = 255;
+
+                for (int i = 0; i < blendedPixels.Length; i += 4)
+                {
+                    int alpha = blendedPixels[i + 3];
+                    lowestAlpha = alpha < lowestAlpha ? alpha : lowestAlpha;
+
+                    if (alpha > 8)
+                    {
+                        int red = blendedPixels[i + 2];
+                        darkestRed = red < darkestRed ? red : darkestRed;
+                    }
+                }
+
+                if (darkestRed < 240)
+                {
+                    failures++;
+                    log.AppendLine(string.Format(
+                        "  FAIL 半透明边缘被“看不见的黑”拉暗（最低红通道 {0}，应 ≥240）", darkestRed));
+                }
+                else
+                {
+                    log.AppendLine(string.Format(
+                        "  OK   透明边缘未产生黑边（半透明像素红通道最低 {0}，alpha 最低 {1}）",
+                        darkestRed, lowestAlpha));
+                }
+
+                // ---- 7. 0° / 360° 旋转必须逐像素恒等 ----
+                checks++;
+                PixelBuffer rotationSource = CreateTestBuffer(80, 60);
+                PixelBuffer rotatedZero = geometry.RotateArbitrary(rotationSource, 0.0, null, true);
+                PixelBuffer rotatedFull = geometry.RotateArbitrary(rotationSource, 360.0, null, false);
+
+                bool zeroOk = rotatedZero.Width == 80 && rotatedZero.Height == 60
+                              && PixelsEqual(rotationSource.GetPixels(), rotatedZero.GetPixels());
+                bool fullOk = rotatedFull.Width == 80 && rotatedFull.Height == 60
+                              && PixelsEqual(rotationSource.GetPixels(), rotatedFull.GetPixels());
+
+                if (!zeroOk || !fullOk)
+                {
+                    failures++;
+                    log.AppendLine(string.Format(
+                        "  FAIL 0° / 360° 旋转改变了图像（0° → {0}×{1}，360° → {2}×{3}）",
+                        rotatedZero.Width, rotatedZero.Height, rotatedFull.Width, rotatedFull.Height));
+                }
+                else
+                {
+                    log.AppendLine("  OK   0° 与 360° 旋转逐像素恒等（走无损路径）");
+                }
+
+                // ---- 8. 90° 走无损路径，与既有旋转一致 ----
+                checks++;
+                PixelBuffer rightAngleArbitrary = geometry.RotateArbitrary(rotationSource, 90.0, null, true);
+                PixelBuffer rightAngleLossless = geometry.Rotate(rotationSource, RotationAngle.Clockwise90);
+
+                if (rightAngleArbitrary.Width != rightAngleLossless.Width
+                    || rightAngleArbitrary.Height != rightAngleLossless.Height
+                    || !PixelsEqual(rightAngleArbitrary.GetPixels(), rightAngleLossless.GetPixels()))
+                {
+                    failures++;
+                    log.AppendLine(string.Format(
+                        "  FAIL 90° 的任意角度路径与无损旋转不一致（{0}×{1} vs {2}×{3}）",
+                        rightAngleArbitrary.Width, rightAngleArbitrary.Height,
+                        rightAngleLossless.Width, rightAngleLossless.Height));
+                }
+                else
+                {
+                    log.AppendLine("  OK   90° 自动走无损路径，与既有 90° 旋转逐像素一致（且不裁角）");
+                }
+
+                // ---- 9. 旋转画布尺寸符合包围盒公式 ----
+                checks++;
+                int boxWidth;
+                int boxHeight;
+                GeometryFilters.CalcRotatedSize(400, 300, 30.0, false, out boxWidth, out boxHeight);
+
+                double cos30 = Math.Cos(30.0 * Math.PI / 180.0);
+                double sin30 = Math.Sin(30.0 * Math.PI / 180.0);
+                int expectedBoxWidth = (int)Math.Round(400 * cos30 + 300 * sin30);
+                int expectedBoxHeight = (int)Math.Round(400 * sin30 + 300 * cos30);
+
+                if (boxWidth != expectedBoxWidth || boxHeight != expectedBoxHeight)
+                {
+                    failures++;
+                    log.AppendLine(string.Format(
+                        "  FAIL 旋转包围盒尺寸不符（得到 {0}×{1}，期望 {2}×{3}）",
+                        boxWidth, boxHeight, expectedBoxWidth, expectedBoxHeight));
+                }
+                else
+                {
+                    log.AppendLine(string.Format(
+                        "  OK   旋转包围盒尺寸正确（400×300 转 30° → {0}×{1}）", boxWidth, boxHeight));
+                }
+
+                // ---- 10. 任意角度：中心保持原色、四角为填充色 ----
+                checks++;
+                PixelBuffer redSquare = CreateSolidBuffer(200, 200, 255, 0, 0);
+                PixelBuffer tilted = geometry.RotateArbitrary(redSquare, 15.0, Colors.White, false);
+
+                byte[] centerPixel = CopyPixel(tilted, tilted.Width / 2, tilted.Height / 2);
+                byte[] cornerPixel = CopyPixel(tilted, 0, 0);
+                bool centerIsRed = centerPixel[2] >= 250 && centerPixel[1] <= 5 && centerPixel[0] <= 5;
+                bool cornerIsWhite = cornerPixel[0] >= 250 && cornerPixel[1] >= 250 && cornerPixel[2] >= 250;
+
+                if (!centerIsRed || !cornerIsWhite)
+                {
+                    failures++;
+                    log.AppendLine(string.Format(
+                        "  FAIL 旋转后中心 / 四角不合预期（中心 {0}，左上角 {1}）",
+                        DescribePixel(centerPixel), DescribePixel(cornerPixel)));
+                }
+                else
+                {
+                    log.AppendLine(string.Format(
+                        "  OK   任意角度旋转：中心保持原色、空白角填充为白色（画布 {0}×{1}）",
+                        tilted.Width, tilted.Height));
+                }
+
+                // ---- 11. 自动裁掉空白角：一个背景色像素都不该剩下 ----
+                checks++;
+                PixelBuffer croppedTilt = geometry.RotateArbitrary(redSquare, 15.0, Colors.White, true);
+                byte[] croppedPixels = croppedTilt.GetPixels();
+                int backgroundPixels = 0;
+                int lowestRed = 255;
+
+                for (int i = 0; i < croppedPixels.Length; i += 4)
+                {
+                    if (croppedPixels[i] >= 250 && croppedPixels[i + 1] >= 250 && croppedPixels[i + 2] >= 250)
+                    {
+                        backgroundPixels++;
+                    }
+
+                    int red = croppedPixels[i + 2];
+                    lowestRed = red < lowestRed ? red : lowestRed;
+                }
+
+                bool shrunk = croppedTilt.Width < tilted.Width && croppedTilt.Height < tilted.Height;
+
+                if (!shrunk || backgroundPixels > 0 || lowestRed < 240)
+                {
+                    failures++;
+                    log.AppendLine(string.Format(
+                        "  FAIL 自动裁角未达预期（{0}×{1} vs 包围盒 {2}×{3}，残留背景像素 {4}，最低红通道 {5}）",
+                        croppedTilt.Width, croppedTilt.Height, tilted.Width, tilted.Height,
+                        backgroundPixels, lowestRed));
+                }
+                else
+                {
+                    log.AppendLine(string.Format(
+                        "  OK   自动裁掉空白角：{0}×{1} → {2}×{3}，且无任何背景色像素残留",
+                        tilted.Width, tilted.Height, croppedTilt.Width, croppedTilt.Height));
+                }
+
+                // ---- 12. ViewModel 端到端：单位换算 / 锁定宽高比 / 应用 / 撤销 ----
+                MainViewModel viewModel = new MainViewModel(
+                    imageService,
+                    new NullDialogService(),
+                    new ImmediateDispatcherService());
+
+                viewModel.LoadFromPathAsync(imagePath).GetAwaiter().GetResult();
+
+                checks++;
+
+                if (!viewModel.HasDocument)
+                {
+                    failures++;
+                    log.AppendLine("  FAIL 未能加载测试图片，跳过 ViewModel 部分");
+                    log.AppendLine();
+                    return;
+                }
+
+                int originalWidth = viewModel.Document.PixelWidth;
+                int originalHeight = viewModel.Document.PixelHeight;
+                double originalDpiX = viewModel.Document.DpiX;
+                double originalDpiY = viewModel.Document.DpiY;
+
+                // ---- 锁定宽高比：改宽度自动同步高度 ----
+                checks++;
+                viewModel.ResizeUnitIndex = 0;
+                viewModel.LockAspectRatio = true;
+                viewModel.ResizeTargetWidth = 160.0;
+
+                double expectedHeightValue = 160.0 * originalHeight / originalWidth;
+
+                if (Math.Abs(viewModel.ResizeTargetHeight - expectedHeightValue) > 0.01
+                    || viewModel.ComputedResizeWidthPixels != 160
+                    || viewModel.ComputedResizeHeightPixels != (int)Math.Round(expectedHeightValue))
+                {
+                    failures++;
+                    log.AppendLine(string.Format(
+                        "  FAIL 锁定宽高比未同步高度（宽 {0:0.###}，高 {1:0.###}，期望高 {2:0.###}）",
+                        viewModel.ResizeTargetWidth, viewModel.ResizeTargetHeight, expectedHeightValue));
+                }
+                else
+                {
+                    log.AppendLine(string.Format(
+                        "  OK   锁定宽高比生效：宽 160 → 高自动 {0:0.#}（原图 {1}×{2}）",
+                        viewModel.ResizeTargetHeight, originalWidth, originalHeight));
+                }
+
+                // ---- 切换单位不得改变实际像素尺寸 ----
+                checks++;
+                int beforeSwitchWidth = viewModel.ComputedResizeWidthPixels;
+                int beforeSwitchHeight = viewModel.ComputedResizeHeightPixels;
+
+                viewModel.ResizeUnitIndex = 1;                       // 百分比
+                double percentValue = viewModel.ResizeTargetWidth;
+                int percentWidth = viewModel.ComputedResizeWidthPixels;
+
+                viewModel.ResizeUnitIndex = 2;                       // 厘米
+                double centimeterValue = viewModel.ResizeTargetWidth;
+                int centimeterWidth = viewModel.ComputedResizeWidthPixels;
+
+                viewModel.ResizeUnitIndex = 0;                       // 回到像素
+
+                bool unitOk = percentWidth == beforeSwitchWidth
+                              && centimeterWidth == beforeSwitchWidth
+                              && viewModel.ComputedResizeHeightPixels == beforeSwitchHeight;
+
+                if (!unitOk)
+                {
+                    failures++;
+                    log.AppendLine(string.Format(
+                        "  FAIL 切换单位改变了实际像素尺寸（像素 {0}，百分比 {1}，厘米 {2}）",
+                        beforeSwitchWidth, percentWidth, centimeterWidth));
+                }
+                else
+                {
+                    log.AppendLine(string.Format(
+                        "  OK   单位换算保持一致：{0} px = {1:0.#}% = {2:0.###} cm（切换后仍是 {3}×{4} px）",
+                        beforeSwitchWidth, percentValue, centimeterValue,
+                        viewModel.ComputedResizeWidthPixels, viewModel.ComputedResizeHeightPixels));
+                }
+
+                // ---- 应用缩放 ----
+                checks++;
+                viewModel.ResizeTargetWidth = 160.0;
+                int applyWidth = viewModel.ComputedResizeWidthPixels;
+                int applyHeight = viewModel.ComputedResizeHeightPixels;
+
+                viewModel.ApplyResizeCommand.Execute(null);
+                WaitForIdle(viewModel);
+
+                bool sizeApplied = viewModel.Document != null
+                                   && viewModel.Document.PixelWidth == applyWidth
+                                   && viewModel.Document.PixelHeight == applyHeight;
+
+                if (!sizeApplied)
+                {
+                    failures++;
+                    log.AppendLine(string.Format(
+                        "  FAIL 应用尺寸未生效（当前 {0}×{1}，期望 {2}×{3}）",
+                        viewModel.Document == null ? 0 : viewModel.Document.PixelWidth,
+                        viewModel.Document == null ? 0 : viewModel.Document.PixelHeight,
+                        applyWidth, applyHeight));
+                }
+                else
+                {
+                    log.AppendLine(string.Format(
+                        "  OK   应用尺寸端到端生效（{0}×{1} → {2}×{3}）",
+                        originalWidth, originalHeight, applyWidth, applyHeight));
+                }
+
+                // ---- DPI 必须保持 ----
+                checks++;
+
+                if (viewModel.Document == null
+                    || Math.Abs(viewModel.Document.DpiX - originalDpiX) > 0.01
+                    || Math.Abs(viewModel.Document.DpiY - originalDpiY) > 0.01)
+                {
+                    failures++;
+                    log.AppendLine("  FAIL 缩放后 DPI 未保持");
+                }
+                else
+                {
+                    log.AppendLine(string.Format("  OK   缩放后 DPI 保持（{0:0.#} DPI）", viewModel.Document.DpiX));
+                }
+
+                // ---- 撤销恢复原尺寸 ----
+                checks++;
+                viewModel.UndoCommand.Execute(null);
+                WaitForIdle(viewModel);
+
+                if (viewModel.Document == null
+                    || viewModel.Document.PixelWidth != originalWidth
+                    || viewModel.Document.PixelHeight != originalHeight)
+                {
+                    failures++;
+                    log.AppendLine(string.Format(
+                        "  FAIL 撤销未恢复原始尺寸（当前 {0}×{1}）",
+                        viewModel.Document == null ? 0 : viewModel.Document.PixelWidth,
+                        viewModel.Document == null ? 0 : viewModel.Document.PixelHeight));
+                }
+                else
+                {
+                    log.AppendLine("  OK   撤销恢复原始尺寸（缩放已进入撤销历史）");
+                }
+
+                // ---- 任意角度旋转端到端（不裁角 + 黑色填充） ----
+                checks++;
+                viewModel.RotationDegrees = 45.0;
+                viewModel.RotationFillIndex = 2;                     // 黑色
+                viewModel.RotationCropToInscribed = false;
+
+                int rotateExpectedWidth;
+                int rotateExpectedHeight;
+                GeometryFilters.CalcRotatedSize(
+                    viewModel.Document.PixelWidth,
+                    viewModel.Document.PixelHeight,
+                    45.0,
+                    false,
+                    out rotateExpectedWidth,
+                    out rotateExpectedHeight);
+
+                viewModel.ApplyRotationCommand.Execute(null);
+                WaitForIdle(viewModel);
+
+                bool rotationApplied = viewModel.Document != null
+                                       && viewModel.Document.PixelWidth == rotateExpectedWidth
+                                       && viewModel.Document.PixelHeight == rotateExpectedHeight;
+
+                if (!rotationApplied)
+                {
+                    failures++;
+                    log.AppendLine(string.Format(
+                        "  FAIL 旋转画布尺寸不符（得到 {0}×{1}，期望 {2}×{3}）",
+                        viewModel.Document == null ? 0 : viewModel.Document.PixelWidth,
+                        viewModel.Document == null ? 0 : viewModel.Document.PixelHeight,
+                        rotateExpectedWidth, rotateExpectedHeight));
+                }
+                else
+                {
+                    log.AppendLine(string.Format(
+                        "  OK   任意角度旋转端到端生效（45° → {0}×{1}）",
+                        viewModel.Document.PixelWidth, viewModel.Document.PixelHeight));
+                }
+
+                // ---- 旋转后的四角应为填充色 ----
+                checks++;
+                PixelBuffer rotatedPixels = PixelBuffer.FromBitmap(viewModel.Document.Bitmap);
+                byte[] rotatedCorner = CopyPixel(rotatedPixels, 0, 0);
+                bool cornerIsBlack = rotatedCorner[0] <= 5 && rotatedCorner[1] <= 5 && rotatedCorner[2] <= 5;
+
+                if (!cornerIsBlack)
+                {
+                    failures++;
+                    log.AppendLine("  FAIL 旋转后左上角不是填充的黑色：" + DescribePixel(rotatedCorner));
+                }
+                else
+                {
+                    log.AppendLine("  OK   旋转后空白角填充为黑色（左上角 " + DescribePixel(rotatedCorner) + "）");
+                }
+
+                // ---- 旋转后"适应窗口"必须按新尺寸重算 ----
+                checks++;
+                viewModel.FitToWindow();
+                double fittedZoom = viewModel.ZoomFactor;
+
+                if (fittedZoom <= 0.0 || fittedZoom > MainViewModel.MaxZoom)
+                {
+                    failures++;
+                    log.AppendLine(string.Format("  FAIL 旋转后适应窗口缩放异常（{0:0.####}）", fittedZoom));
+                }
+                else
+                {
+                    log.AppendLine(string.Format(
+                        "  OK   几何变换后适应窗口缩放正常（{0}）", viewModel.ZoomPercentText));
+                }
+            }
+            catch (Exception ex)
+            {
+                failures++;
+                log.AppendLine("  FAIL 尺寸 / 旋转测试异常: " + ex.GetType().Name + " " + ex.Message);
+            }
+
+            log.AppendLine();
+        }
+
+        /// <summary>黑 / 白相间的竖条纹（用于检验降采样是否把细纹平滑掉）。</summary>
+        private static PixelBuffer CreateStripedBuffer(int width, int height, int stripeWidth)
+        {
+            byte[] pixels = new byte[width * height * 4];
+
+            for (int y = 0; y < height; y++)
+            {
+                for (int x = 0; x < width; x++)
+                {
+                    byte value = ((x / stripeWidth) % 2) == 0 ? (byte)255 : (byte)0;
+                    int index = (y * width + x) * 4;
+
+                    pixels[index] = value;
+                    pixels[index + 1] = value;
+                    pixels[index + 2] = value;
+                    pixels[index + 3] = 255;
+                }
+            }
+
+            return new PixelBuffer(pixels, width, height);
+        }
+
+        /// <summary>
+        /// 左半不透明红、右半完全透明（且 RGB 为 0）。
+        /// 右侧的 "0,0,0,0" 正是"直通 alpha 混色会变黑"的根源，用于验证预乘 alpha 是否生效。
+        /// </summary>
+        private static PixelBuffer CreateHalfTransparentBuffer(int width, int height)
+        {
+            byte[] pixels = new byte[width * height * 4];
+
+            for (int y = 0; y < height; y++)
+            {
+                for (int x = 0; x < width; x++)
+                {
+                    int index = (y * width + x) * 4;
+
+                    // BGRA
+                    pixels[index] = 0;
+                    pixels[index + 1] = 0;
+                    pixels[index + 2] = x < width / 2 ? (byte)255 : (byte)0;
+                    pixels[index + 3] = x < width / 2 ? (byte)255 : (byte)0;
+                }
+            }
+
+            return new PixelBuffer(pixels, width, height);
         }
 
         /// <summary>

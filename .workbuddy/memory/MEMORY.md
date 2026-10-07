@@ -36,8 +36,19 @@
   想验证某个静态方法请**改成加一条自检**，别走反射。
 
 ## 已记录的坑
-- `WmpBitmapEncoder` 是 **JPEG XR（HD Photo）**，不是 WebP；代码注释/属性名 `IsWebP`/README 均为错误表述，待修正为 `IsJpegXr`。
+- `WmpBitmapEncoder` 是 **JPEG XR（HD Photo）**，不是 WebP；代码注释/属性名 `IsWebP`/README 均为错误表述，已修正为 `IsJpegXr`。
 - 调整预览用降采样 + 防抖提交；`_lastRenderedAdjustments` 与 `_committedAdjustments` 必须分开维护（曾因此丢历史步骤）。
+- `Parallel.For` 的 TLocal 重载（`Func<TLocal>` + `body` + `Action<TLocal>`）**必须传满 6 个参数含 `localFinally`**，
+  否则编译器会匹配到 `long` 重载，循环变量变成 long 而报 CS0266。
+- ViewModel 属性名会遮蔽同名类型：曾把属性命名为 `RotationAngle`，压掉了 `Services.Filters.RotationAngle` 枚举，
+  导致其它 partial 里的 `RotationAngle.Clockwise90` 编译失败。现命名 `RotationDegrees`。
+- 自检里窗口不 `Show()` → **可视树未建立**，`VisualTreeHelper` 取不到控件；要用 `LogicalTreeHelper` 走逻辑树。
+
+## 已记录的经验
+- 重采样必须"缩小时按比例展宽核"才抗混叠；必须"预乘 alpha 再还原"才不会在透明边缘出黑边。
+  验证手段：1px 条纹缩 10 倍应得均匀中灰（邻近取样对照组会整片变纯黑）。
+- 任意角度旋转用逆映射（正映射会留孔洞）；90° 整数倍应短路到无损旋转路径。
+- 几何变换改变画布尺寸后，若处于"适应窗口"必须重算 ZoomFactor。
 
 ## 工作流约定
 - 需求决策走 grill 流程：AI 质询 → 用户拍板 → 按 P0/P1/P2 实施。

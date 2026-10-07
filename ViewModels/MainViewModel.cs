@@ -175,6 +175,9 @@ namespace PSText.ViewModels
             // 高级滤镜与裁剪命令（见 MainViewModel.Filters.cs / MainViewModel.Crop.cs）
             InitializeFilterCommands();
 
+            // 尺寸缩放与任意角度旋转命令（见 MainViewModel.Geometry.cs）
+            InitializeGeometryCommands();
+
             // 打印与批量打印命令（见 MainViewModel.Print.cs）
             InitializePrintCommands();
 

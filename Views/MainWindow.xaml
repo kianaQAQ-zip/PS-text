@@ -645,6 +645,119 @@
             </ScrollViewer>
           </TabItem>
 
+          <!-- ==================== 尺寸 ==================== -->
+          <TabItem Header="尺寸">
+            <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+              <StackPanel Margin="14,12">
+
+                <TextBlock Text="图像大小" FontSize="14" FontWeight="SemiBold"
+                           Foreground="{DynamicResource ChromeForegroundBrush}" />
+                <TextBlock Text="{Binding ResizeOriginalText}" Margin="0,6,0,0" FontSize="11" TextWrapping="Wrap"
+                           Foreground="{DynamicResource SubtleForegroundBrush}" />
+
+                <TextBlock Text="单位" Margin="0,12,0,0" Style="{StaticResource StatusLabelStyle}" />
+                <ComboBox SelectedIndex="{Binding ResizeUnitIndex, Mode=TwoWay}"
+                          IsEnabled="{Binding HasDocument}">
+                  <ComboBoxItem Content="像素 (px)" />
+                  <ComboBoxItem Content="百分比 (%)" />
+                  <ComboBoxItem Content="厘米 (cm，按图片 DPI)" />
+                </ComboBox>
+
+                <Grid Margin="0,10,0,0">
+                  <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="*" />
+                  </Grid.ColumnDefinitions>
+                  <StackPanel Grid.Column="0">
+                    <TextBlock Text="宽度" Style="{StaticResource StatusLabelStyle}" />
+                    <TextBox Text="{Binding ResizeTargetWidth, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                             IsEnabled="{Binding HasDocument}" />
+                  </StackPanel>
+                  <TextBlock Grid.Column="1" Text="×" Margin="8,18,8,0"
+                             Foreground="{DynamicResource SubtleForegroundBrush}" />
+                  <StackPanel Grid.Column="2">
+                    <TextBlock Text="高度" Style="{StaticResource StatusLabelStyle}" />
+                    <TextBox Text="{Binding ResizeTargetHeight, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                             IsEnabled="{Binding HasDocument}" />
+                  </StackPanel>
+                </Grid>
+
+                <CheckBox Content="锁定宽高比" Margin="0,10,0,0"
+                          IsChecked="{Binding LockAspectRatio, Mode=TwoWay}"
+                          IsEnabled="{Binding HasDocument}"
+                          Foreground="{DynamicResource ChromeForegroundBrush}" />
+
+                <TextBlock Text="快捷比例" Margin="0,10,0,0" Style="{StaticResource StatusLabelStyle}" />
+                <WrapPanel Margin="0,4,0,0">
+                  <Button Content="25%" MinWidth="46" Style="{StaticResource ToolbarButtonStyle}"
+                          Command="{Binding ApplyResizePresetCommand}" CommandParameter="25"
+                          IsEnabled="{Binding HasDocument}" />
+                  <Button Content="50%" MinWidth="46" Style="{StaticResource ToolbarButtonStyle}"
+                          Command="{Binding ApplyResizePresetCommand}" CommandParameter="50"
+                          IsEnabled="{Binding HasDocument}" />
+                  <Button Content="100%" MinWidth="46" Style="{StaticResource ToolbarButtonStyle}"
+                          Command="{Binding ApplyResizePresetCommand}" CommandParameter="100"
+                          IsEnabled="{Binding HasDocument}" />
+                  <Button Content="200%" MinWidth="46" Style="{StaticResource ToolbarButtonStyle}"
+                          Command="{Binding ApplyResizePresetCommand}" CommandParameter="200"
+                          IsEnabled="{Binding HasDocument}" />
+                </WrapPanel>
+
+                <TextBlock Text="插值方式" Margin="0,12,0,0" Style="{StaticResource StatusLabelStyle}" />
+                <ComboBox SelectedIndex="{Binding ResizeKernelIndex, Mode=TwoWay}"
+                          IsEnabled="{Binding HasDocument}">
+                  <ComboBoxItem Content="三次立方（推荐）" />
+                  <ComboBoxItem Content="双线性（更快）" />
+                  <ComboBoxItem Content="邻近（保留硬边）" />
+                </ComboBox>
+
+                <TextBlock Text="{Binding ResizeResultText}" Margin="0,10,0,0" FontSize="11" TextWrapping="Wrap"
+                           Foreground="{DynamicResource SubtleForegroundBrush}" />
+
+                <Button Content="应用尺寸" Style="{StaticResource ToolbarButtonStyle}"
+                        Margin="0,10,0,0" HorizontalAlignment="Left"
+                        Command="{Binding ApplyResizeCommand}" />
+
+                <Rectangle Height="1" Margin="0,16" Fill="{DynamicResource BorderBrush}" />
+
+                <TextBlock Text="任意角度旋转" FontSize="14" FontWeight="SemiBold"
+                           Foreground="{DynamicResource ChromeForegroundBrush}" />
+
+                <DockPanel Margin="0,10,0,0" LastChildFill="False">
+                  <TextBlock DockPanel.Dock="Left" Text="角度" Style="{StaticResource StatusLabelStyle}" Margin="0" />
+                  <TextBlock DockPanel.Dock="Right" MinWidth="52" TextAlignment="Right"
+                             Style="{StaticResource StatusTextStyle}" Margin="0"
+                             Text="{Binding RotationDegrees, StringFormat={}{0:0.#}°}" />
+                </DockPanel>
+                <Slider Minimum="-180" Maximum="180" TickFrequency="15" SmallChange="0.5" LargeChange="5"
+                        IsEnabled="{Binding HasDocument}"
+                        Value="{Binding RotationDegrees, Mode=TwoWay}" />
+
+                <TextBlock Text="空白角填充" Margin="0,12,0,0" Style="{StaticResource StatusLabelStyle}" />
+                <ComboBox SelectedIndex="{Binding RotationFillIndex, Mode=TwoWay}"
+                          IsEnabled="{Binding HasDocument}">
+                  <ComboBoxItem Content="透明" />
+                  <ComboBoxItem Content="白色" />
+                  <ComboBoxItem Content="黑色" />
+                  <ComboBoxItem Content="灰色" />
+                </ComboBox>
+
+                <CheckBox Content="自动裁掉空白角（保持原比例）" Margin="0,10,0,0"
+                          IsChecked="{Binding RotationCropToInscribed, Mode=TwoWay}"
+                          IsEnabled="{Binding HasDocument}"
+                          Foreground="{DynamicResource ChromeForegroundBrush}" />
+
+                <TextBlock Text="{Binding RotationResultText}" Margin="0,10,0,0" FontSize="11" TextWrapping="Wrap"
+                           Foreground="{DynamicResource SubtleForegroundBrush}" />
+
+                <Button Content="应用旋转" Style="{StaticResource ToolbarButtonStyle}"
+                        Margin="0,10,0,0" HorizontalAlignment="Left"
+                        Command="{Binding ApplyRotationCommand}" />
+              </StackPanel>
+            </ScrollViewer>
+          </TabItem>
+
           <!-- ==================== 打印 ==================== -->
           <TabItem Header="打印">
             <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
