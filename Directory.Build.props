@@ -1,0 +1,12 @@
+<Project>
+
+  <!--
+    把编译产物集中到 build\ 目录下，避免 bin\obj 污染源码根目录。
+    注意：MSBuild 要求 BaseOutputPath 必须以斜杠结尾。
+  -->
+  <PropertyGroup>
+    <BaseOutputPath>$(MSBuildThisFileDirectory)build\bin\</BaseOutputPath>
+    <BaseIntermediateOutputPath>$(MSBuildThisFileDirectory)build\obj\</BaseIntermediateOutputPath>
+  </PropertyGroup>
+
+</Project>

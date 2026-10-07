@@ -1,0 +1,12 @@
+<Application x:Class="PSText.App"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+  <!--
+    启动窗口由 Program.Main → App.Run(args) 创建（需要注入服务）。
+
+    注意：这里刻意不使用 ResourceDictionary.MergedDictionaries 静态合并主题资源。
+    实测（.NET Framework 4.8）在窗口 BAML 解析阶段用 StaticResource 查找这种
+    应用级合并字典并不可靠，会抛“找不到名为 Xxx 的资源”。
+    因此统一由 services/ThemeManager.Apply 在创建窗口前用代码合并，见 App.xaml.cs。
+  -->
+</Application>

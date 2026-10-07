@@ -1,0 +1,18 @@
+# 编译产物
+build/
+bin/
+obj/
+
+# 用户临时文件
+*.user
+*.suo
+.vs/
+
+# 自检 / 临时输出
+*.selftest.log
+selftest.log
+selftest.stdout.txt
+
+# 输入法（搜狗）等其他进程在仓库根目录产生的日志
+debug.log
+*.log

@@ -1,0 +1,758 @@
+<Window x:Class="PSText.Views.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:conv="clr-namespace:PSText.Infrastructure.Converters"
+        xmlns:behaviors="clr-namespace:PSText.Infrastructure.Behaviors"
+        Title="{Binding WindowTitle}"
+        Icon="pack://application:,,,/PS-text;component/Resources/PS-text.ico"
+        Width="1180"
+        Height="760"
+        MinWidth="720"
+        MinHeight="480"
+        WindowStartupLocation="CenterScreen"
+        AllowDrop="True"
+        Background="{DynamicResource CanvasBackgroundBrush}"
+        Foreground="{DynamicResource ChromeForegroundBrush}"
+        FontFamily="Microsoft YaHei UI, Segoe UI"
+        FontSize="12"
+        UseLayoutRounding="True"
+        TextOptions.TextFormattingMode="Display">
+
+  <Window.Resources>
+    <!--
+      注意：不要把应用级样式放在 Window.Resources 里引用。
+      经验证，窗口在解析阶段（BAML 加载）通过 StaticResource 查找“应用级 MergedDictionaries”
+      里的样式并不可靠，会抛 “找不到名为 Xxx 的资源”。
+      因此：通用样式与主题字典统一由 ThemeManager 在创建窗口前合并（见 Services/ThemeManager.cs）。
+      这里只放窗口私有资源 + 需要类型转换器的私有样式。
+    -->
+    <conv:BooleanToVisibilityConverter x:Key="BoolToVisibility" />
+    <conv:MultiplyConverter x:Key="Multiply" />
+
+    <!-- 状态栏：缩放百分比（粗体），基于应用级 StatusTextStyle -->
+    <Style x:Key="ZoomTextStyle" TargetType="TextBlock" BasedOn="{StaticResource StatusTextStyle}">
+      <Setter Property="FontWeight" Value="SemiBold" />
+      <Setter Property="MinWidth" Value="52" />
+      <Setter Property="TextAlignment" Value="Right" />
+    </Style>
+
+  </Window.Resources>
+
+  <Grid>
+    <Grid.RowDefinitions>
+      <RowDefinition Height="Auto" />
+      <RowDefinition Height="Auto" />
+      <RowDefinition Height="*" />
+      <RowDefinition Height="Auto" />
+    </Grid.RowDefinitions>
+
+    <!-- ==================== 菜单栏 ==================== -->
+    <Menu Grid.Row="0"
+          Background="{DynamicResource ChromeBackgroundBrush}"
+          Foreground="{DynamicResource ChromeForegroundBrush}">
+      <MenuItem Header="文件(_F)">
+        <MenuItem Header="打开(_O)…" InputGestureText="Ctrl+O" Command="{Binding OpenCommand}" />
+        <MenuItem Header="最近打开(_R)">
+          <MenuItem ItemsSource="{Binding RecentFiles}"
+                    IsEnabled="{Binding HasRecentFiles}">
+            <MenuItem.ItemContainerStyle>
+              <Style TargetType="MenuItem">
+                <Setter Property="Header" Value="{Binding DisplayName}" />
+                <Setter Property="ToolTip" Value="{Binding FilePath}" />
+                <!-- 每项自带命令，避免依赖祖先 DataContext 的绑定路径 -->
+                <Setter Property="Command" Value="{Binding OpenCommand}" />
+              </Style>
+            </MenuItem.ItemContainerStyle>
+          </MenuItem>
+          <Separator />
+          <MenuItem Header="清空最近记录" Command="{Binding ClearRecentFilesCommand}" />
+        </MenuItem>
+        <Separator />
+        <MenuItem Header="保存(_S)" InputGestureText="Ctrl+S" Command="{Binding SaveCommand}" />
+        <MenuItem Header="另存为(_A)…" InputGestureText="Ctrl+Shift+S" Command="{Binding SaveAsCommand}" />
+        <Separator />
+        <MenuItem Header="打印(_P)…" InputGestureText="Ctrl+P" Command="{Binding PrintPreviewCommand}" />
+        <MenuItem Header="直接打印(_D)…" Command="{Binding PrintCommand}" />
+        <Separator />
+        <MenuItem Header="退出(_X)" InputGestureText="Alt+F4" Click="OnExitClick" />
+      </MenuItem>
+
+      <MenuItem Header="编辑(_E)">
+        <MenuItem Header="撤销(_U)" InputGestureText="Ctrl+Z" Command="{Binding UndoCommand}" />
+        <MenuItem Header="重做(_R)" InputGestureText="Ctrl+Y" Command="{Binding RedoCommand}" />
+        <Separator />
+        <MenuItem Header="复位基础调整" Command="{Binding ResetAdjustmentsCommand}" />
+      </MenuItem>
+
+      <MenuItem Header="视图(_V)">
+        <MenuItem Header="适应窗口(_F)" InputGestureText="Ctrl+0" Command="{Binding FitToWindowCommand}" />
+        <MenuItem Header="原始大小(_A)" InputGestureText="Ctrl+1" Command="{Binding ActualSizeCommand}" />
+        <Separator />
+        <MenuItem Header="放大(_I)" InputGestureText="Ctrl++" Command="{Binding ZoomInCommand}" />
+        <MenuItem Header="缩小(_O)" InputGestureText="Ctrl+-" Command="{Binding ZoomOutCommand}" />
+        <Separator />
+        <MenuItem Header="抓手工具" InputGestureText="空格" Command="{Binding ToggleHandToolCommand}" />
+        <Separator />
+        <MenuItem Header="主题">
+          <MenuItem Header="跟随系统" IsCheckable="True"
+                    IsChecked="{Binding IsSystemTheme, Mode=OneWay}"
+                    Command="{Binding FollowSystemThemeCommand}" />
+          <MenuItem Header="浅色" IsCheckable="True"
+                    IsChecked="{Binding IsLightTheme, Mode=OneWay}"
+                    Command="{Binding SetThemeCommand}" CommandParameter="1" />
+          <MenuItem Header="深色" IsCheckable="True"
+                    IsChecked="{Binding IsDarkTheme, Mode=OneWay}"
+                    Command="{Binding SetThemeCommand}" CommandParameter="2" />
+          <Separator />
+          <MenuItem Header="在浅色 / 深色间切换" InputGestureText="Ctrl+T"
+                    Command="{Binding ToggleThemeCommand}" />
+        </MenuItem>
+      </MenuItem>
+
+      <MenuItem Header="帮助(_H)">
+        <MenuItem Header="关于 PS-text" Command="{Binding ShowAboutCommand}" />
+      </MenuItem>
+    </Menu>
+
+    <!-- ==================== 工具栏 ==================== -->
+    <Border Grid.Row="1"
+            Background="{DynamicResource ChromeBackgroundBrush}"
+            BorderBrush="{DynamicResource BorderBrush}"
+            BorderThickness="0,0,0,1">
+      <DockPanel LastChildFill="False" Margin="6,5">
+
+        <!-- 左侧：文件操作 -->
+        <StackPanel DockPanel.Dock="Left" Orientation="Horizontal">
+          <Button Content="打开 (Ctrl+O)"
+                  Style="{StaticResource ToolbarButtonStyle}"
+                  Command="{Binding OpenCommand}" />
+          <Button Content="保存 (Ctrl+S)"
+                  Style="{StaticResource ToolbarButtonStyle}"
+                  Command="{Binding SaveCommand}" />
+          <Button Content="另存为"
+                  Style="{StaticResource ToolbarButtonStyle}"
+                  Command="{Binding SaveAsCommand}" />
+          <Rectangle Style="{StaticResource ToolbarSeparatorStyle}" />
+          <Button Content="撤销 (Ctrl+Z)"
+                  Style="{StaticResource ToolbarButtonStyle}"
+                  MinWidth="86"
+                  ToolTip="撤销上一步编辑"
+                  Command="{Binding UndoCommand}" />
+          <Button Content="重做 (Ctrl+Y)"
+                  Style="{StaticResource ToolbarButtonStyle}"
+                  MinWidth="86"
+                  ToolTip="重做被撤销的编辑"
+                  Command="{Binding RedoCommand}" />
+          <Rectangle Style="{StaticResource ToolbarSeparatorStyle}" />
+          <ToggleButton Content="抓手 (Space)"
+                        Style="{StaticResource ToolbarToggleButtonStyle}"
+                        IsChecked="{Binding IsHandToolActive, Mode=OneWay}"
+                        IsEnabled="{Binding HasDocument}" />
+        </StackPanel>
+
+        <!-- 右侧：视图缩放 -->
+        <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
+          <RadioButton Content="适应窗口"
+                       Style="{StaticResource ModeRadioStyle}"
+                       IsChecked="{Binding IsFitToWindow, Mode=OneWay}"
+                       Command="{Binding FitToWindowCommand}" />
+          <RadioButton Content="原始大小"
+                       Style="{StaticResource ModeRadioStyle}"
+                       IsChecked="{Binding IsActualSize, Mode=OneWay}"
+                       Command="{Binding ActualSizeCommand}" />
+          <Rectangle Style="{StaticResource ToolbarSeparatorStyle}" />
+          <Button Content="－"
+                  Style="{StaticResource ToolbarButtonStyle}"
+                  MinWidth="34"
+                  ToolTip="缩小 (Ctrl+-)"
+                  Command="{Binding ZoomOutCommand}" />
+          <Button Content="＋"
+                  Style="{StaticResource ToolbarButtonStyle}"
+                  MinWidth="34"
+                  ToolTip="放大 (Ctrl++)"
+                  Command="{Binding ZoomInCommand}" />
+        </StackPanel>
+      </DockPanel>
+    </Border>
+
+    <!-- ==================== 画布 + 调整面板 ==================== -->
+    <Grid Grid.Row="2">
+      <Grid.ColumnDefinitions>
+        <ColumnDefinition Width="*" MinWidth="240" />
+        <ColumnDefinition Width="Auto" />
+        <ColumnDefinition Width="296" MinWidth="220" />
+      </Grid.ColumnDefinitions>
+
+      <!-- 左侧：画布 -->
+      <Grid Grid.Column="0" Background="{DynamicResource CanvasBackgroundBrush}" ClipToBounds="True">
+
+      <!-- 有图片时：可缩放 / 平移的画布 -->
+      <Grid Visibility="{Binding HasDocument, Converter={StaticResource BoolToVisibility}}">
+        <!-- 棋盘格底：透明图片也能看清边界（色值随主题令牌变化） -->
+        <Rectangle Fill="{DynamicResource CheckerboardBrush}" Opacity="0.9" />
+
+        <ScrollViewer x:Name="CanvasScrollViewer"
+                      Background="Transparent"
+                      HorizontalScrollBarVisibility="Auto"
+                      VerticalScrollBarVisibility="Auto"
+                      Focusable="True"
+                      CanContentScroll="False"
+                      behaviors:CanvasInteraction.Zoom="{Binding ZoomFactor, Mode=TwoWay}"
+                      behaviors:CanvasInteraction.HandTool="{Binding IsHandToolActive, Mode=OneWay}"
+                      Loaded="OnCanvasScrollViewerLoaded"
+                      SizeChanged="OnCanvasSizeChanged">
+
+          <!-- 容器尺寸 = 图片像素 × 缩放，因此 ScrollViewer 的滚动范围即为真实内容范围 -->
+          <Grid x:Name="CanvasContainer"
+                HorizontalAlignment="Center"
+                VerticalAlignment="Center">
+            <Grid.Width>
+              <MultiBinding Converter="{StaticResource Multiply}">
+                <Binding Path="ImagePixelWidth" />
+                <Binding Path="ZoomFactor" />
+              </MultiBinding>
+            </Grid.Width>
+            <Grid.Height>
+              <MultiBinding Converter="{StaticResource Multiply}">
+                <Binding Path="ImagePixelHeight" />
+                <Binding Path="ZoomFactor" />
+              </MultiBinding>
+            </Grid.Height>
+
+            <!-- 以中心为原点缩放，保证放大 / 缩小时画面不跑偏 -->
+            <Image x:Name="CanvasImage"
+                   Source="{Binding CurrentBitmap}"
+                   Stretch="None"
+                   HorizontalAlignment="Center"
+                   VerticalAlignment="Center"
+                   RenderOptions.BitmapScalingMode="HighQuality"
+                   SnapsToDevicePixels="True">
+              <Image.RenderTransform>
+                <ScaleTransform x:Name="ImageScale" ScaleX="1" ScaleY="1" CenterX="0" CenterY="0" />
+              </Image.RenderTransform>
+            </Image>
+
+            <!-- ==================== 裁剪遮罩层 ====================
+                 尺寸与图像 1:1，整体随缩放比例放大，因此内部坐标即图像像素坐标，
+                 鼠标位置无需额外换算。 -->
+            <Canvas x:Name="CropOverlay"
+                    Width="{Binding ImagePixelWidth}"
+                    Height="{Binding ImagePixelHeight}"
+                    HorizontalAlignment="Center"
+                    VerticalAlignment="Center"
+                    Background="Transparent"
+                    MouseLeftButtonDown="OnCropMouseDown"
+                    MouseMove="OnCropMouseMove"
+                    MouseLeftButtonUp="OnCropMouseUp"
+                    Visibility="{Binding IsCropping, Converter={StaticResource BoolToVisibility}}">
+              <Canvas.RenderTransform>
+                <ScaleTransform ScaleX="{Binding ZoomFactor}" ScaleY="{Binding ZoomFactor}"
+                                CenterX="0" CenterY="0" />
+              </Canvas.RenderTransform>
+
+              <!-- 遮罩：整块半透明黑，用 Exclude 挖空裁剪区域 -->
+              <Path Fill="{DynamicResource CropMaskBrush}" IsHitTestVisible="False">
+                <Path.Data>
+                  <CombinedGeometry GeometryCombineMode="Exclude">
+                    <CombinedGeometry.Geometry1>
+                      <RectangleGeometry Rect="0,0,100000,100000" />
+                    </CombinedGeometry.Geometry1>
+                    <CombinedGeometry.Geometry2>
+                      <RectangleGeometry Rect="{Binding CropRect, Mode=OneWay}" />
+                    </CombinedGeometry.Geometry2>
+                  </CombinedGeometry>
+                </Path.Data>
+              </Path>
+
+              <!-- 裁剪框边框 -->
+              <Rectangle Canvas.Left="{Binding CropX}" Canvas.Top="{Binding CropY}"
+                         Width="{Binding CropWidth}" Height="{Binding CropHeight}"
+                         Stroke="{DynamicResource AccentBrush}" StrokeThickness="2"
+                         IsHitTestVisible="False" />
+
+              <!-- 三分线辅助（需求 P1-7） -->
+              <Line Canvas.Top="{Binding CropY}" X1="{Binding CropOneThirdX1}" Y1="0"
+                    X2="{Binding CropOneThirdX1}" Y2="{Binding CropHeight}"
+                    Stroke="{DynamicResource GuideBrush}" StrokeThickness="1" IsHitTestVisible="False" />
+              <Line Canvas.Top="{Binding CropY}" X1="{Binding CropTwoThirdX1}" Y1="0"
+                    X2="{Binding CropTwoThirdX1}" Y2="{Binding CropHeight}"
+                    Stroke="{DynamicResource GuideBrush}" StrokeThickness="1" IsHitTestVisible="False" />
+              <Line Canvas.Left="{Binding CropX}" X1="0" Y1="{Binding CropOneThirdY1}"
+                    X2="{Binding CropWidth}" Y2="{Binding CropOneThirdY1}"
+                    Stroke="{DynamicResource GuideBrush}" StrokeThickness="1" IsHitTestVisible="False" />
+              <Line Canvas.Left="{Binding CropX}" X1="0" Y1="{Binding CropTwoThirdY1}"
+                    X2="{Binding CropWidth}" Y2="{Binding CropTwoThirdY1}"
+                    Stroke="{DynamicResource GuideBrush}" StrokeThickness="1" IsHitTestVisible="False" />
+            </Canvas>
+          </Grid>
+        </ScrollViewer>
+      </Grid>
+
+      <!-- 无图片时：空状态提示 + 拖放目标 -->
+      <Border x:Name="EmptyHint"
+              Background="Transparent"
+              Visibility="{Binding HasDocument, Converter={StaticResource BoolToVisibility}, ConverterParameter=invert}">
+        <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center">
+          <TextBlock Text="把图片拖到这里，或点击“打开”"
+                     FontSize="18"
+                     Foreground="{DynamicResource SubtleForegroundBrush}"
+                     HorizontalAlignment="Center" />
+          <TextBlock Text="支持 JPG / PNG / BMP / TIFF / GIF"
+                     FontSize="13"
+                     Margin="0,10,0,0"
+                     Foreground="{DynamicResource SubtleForegroundBrush}"
+                     HorizontalAlignment="Center" />
+          <Button Content="打开图片 (Ctrl+O)"
+                  Style="{StaticResource ToolbarButtonStyle}"
+                  Margin="0,22,0,0"
+                  Padding="18,8"
+                  HorizontalAlignment="Center"
+                  Command="{Binding OpenCommand}" />
+        </StackPanel>
+      </Border>
+
+      <!-- Loading 遮罩：耗时操作时显示，保证 UI 不阻塞 -->
+      <Border Background="{DynamicResource OverlayBrush}"
+              Visibility="{Binding IsBusy, Converter={StaticResource BoolToVisibility}}">
+        <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center">
+          <ProgressBar IsIndeterminate="True" Width="220" Height="6" />
+          <TextBlock Text="正在处理，请稍候…"
+                     Margin="0,14,0,0"
+                     Foreground="White"
+                     HorizontalAlignment="Center" />
+        </StackPanel>
+      </Border>
+      </Grid>
+
+      <!-- 分隔条：可拖动调整面板宽度 -->
+      <GridSplitter Grid.Column="1"
+                    Width="4"
+                    HorizontalAlignment="Stretch"
+                    VerticalAlignment="Stretch"
+                    Background="{DynamicResource BorderBrush}"
+                    ResizeBehavior="PreviousAndNext" />
+
+      <!-- 右侧：基础调整面板 -->
+      <!-- 右侧：编辑面板（分页） -->
+      <Border Grid.Column="2"
+              Background="{DynamicResource ChromeBackgroundBrush}"
+              BorderBrush="{DynamicResource BorderBrush}"
+              BorderThickness="1,0,0,0">
+        <TabControl Background="Transparent"
+                    BorderThickness="0"
+                    Foreground="{DynamicResource ChromeForegroundBrush}"
+                    FontSize="12">
+
+          <!-- ==================== 调整 ==================== -->
+          <TabItem Header="调整">
+            <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+              <StackPanel Margin="14,12">
+                <TextBlock Text="拖动即时预览，松手后按全分辨率应用"
+                           FontSize="11" TextWrapping="Wrap"
+                           Foreground="{DynamicResource SubtleForegroundBrush}" />
+
+                <DockPanel Margin="0,14,0,0" LastChildFill="False">
+                  <TextBlock DockPanel.Dock="Left" Text="亮度" Style="{StaticResource StatusLabelStyle}" Margin="0" />
+                  <TextBlock DockPanel.Dock="Right" MinWidth="34" TextAlignment="Right"
+                             Style="{StaticResource StatusTextStyle}" Margin="0"
+                             Text="{Binding Brightness, StringFormat={}{0:0}}" />
+                </DockPanel>
+                <Slider Minimum="-100" Maximum="100" TickFrequency="10" SmallChange="1" LargeChange="10"
+                        IsEnabled="{Binding HasDocument}"
+                        Value="{Binding Brightness, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged, Delay=40}" />
+
+                <DockPanel Margin="0,12,0,0" LastChildFill="False">
+                  <TextBlock DockPanel.Dock="Left" Text="对比度" Style="{StaticResource StatusLabelStyle}" Margin="0" />
+                  <TextBlock DockPanel.Dock="Right" MinWidth="34" TextAlignment="Right"
+                             Style="{StaticResource StatusTextStyle}" Margin="0"
+                             Text="{Binding Contrast, StringFormat={}{0:0}}" />
+                </DockPanel>
+                <Slider Minimum="-100" Maximum="100" TickFrequency="10" SmallChange="1" LargeChange="10"
+                        IsEnabled="{Binding HasDocument}"
+                        Value="{Binding Contrast, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged, Delay=40}" />
+
+                <DockPanel Margin="0,12,0,0" LastChildFill="False">
+                  <TextBlock DockPanel.Dock="Left" Text="饱和度" Style="{StaticResource StatusLabelStyle}" Margin="0" />
+                  <TextBlock DockPanel.Dock="Right" MinWidth="34" TextAlignment="Right"
+                             Style="{StaticResource StatusTextStyle}" Margin="0"
+                             Text="{Binding Saturation, StringFormat={}{0:0}}" />
+                </DockPanel>
+                <Slider Minimum="-100" Maximum="100" TickFrequency="10" SmallChange="1" LargeChange="10"
+                        IsEnabled="{Binding HasDocument}"
+                        Value="{Binding Saturation, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged, Delay=40}" />
+
+                <DockPanel Margin="0,12,0,0" LastChildFill="False">
+                  <TextBlock DockPanel.Dock="Left" Text="色温" Style="{StaticResource StatusLabelStyle}" Margin="0" />
+                  <TextBlock DockPanel.Dock="Right" MinWidth="34" TextAlignment="Right"
+                             Style="{StaticResource StatusTextStyle}" Margin="0"
+                             Text="{Binding Temperature, StringFormat={}{0:0}}" />
+                </DockPanel>
+                <Slider Minimum="-100" Maximum="100" TickFrequency="10" SmallChange="1" LargeChange="10"
+                        IsEnabled="{Binding HasDocument}"
+                        Value="{Binding Temperature, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged, Delay=40}" />
+                <DockPanel Margin="0,2,0,0" LastChildFill="False">
+                  <TextBlock DockPanel.Dock="Left" Text="偏冷" Style="{StaticResource StatusLabelStyle}" Margin="0" FontSize="10" />
+                  <TextBlock DockPanel.Dock="Right" Text="偏暖" Style="{StaticResource StatusLabelStyle}" Margin="0" FontSize="10" />
+                </DockPanel>
+
+                <TextBlock Text="{Binding AdjustmentsText}" Margin="0,14,0,0" FontSize="11" TextWrapping="Wrap"
+                           Foreground="{DynamicResource SubtleForegroundBrush}" />
+
+                <Button Content="复位为原图" Style="{StaticResource ToolbarButtonStyle}"
+                        Margin="0,10,0,0" HorizontalAlignment="Left"
+                        Command="{Binding ResetAdjustmentsCommand}" />
+
+                <Rectangle Height="1" Margin="0,16" Fill="{DynamicResource BorderBrush}" />
+
+                <TextBlock Text="历史记录" FontSize="14" FontWeight="SemiBold"
+                           Foreground="{DynamicResource ChromeForegroundBrush}" />
+                <TextBlock Text="{Binding HistoryText}" Margin="0,6,0,0" FontSize="11" TextWrapping="Wrap"
+                           Foreground="{DynamicResource SubtleForegroundBrush}" />
+                <TextBlock Text="压缩快照保存，可回退 30 步" Margin="0,4,0,0" FontSize="11" TextWrapping="Wrap"
+                           Foreground="{DynamicResource SubtleForegroundBrush}" />
+
+                <StackPanel Orientation="Horizontal" Margin="0,10,0,0">
+                  <Button Content="撤销" Style="{StaticResource ToolbarButtonStyle}" Command="{Binding UndoCommand}" />
+                  <Button Content="重做" Style="{StaticResource ToolbarButtonStyle}" Command="{Binding RedoCommand}" />
+                </StackPanel>
+
+                <TextBlock Text="正在应用调整…" Margin="0,12,0,0" FontSize="11"
+                           Foreground="{DynamicResource AccentBrush}"
+                           Visibility="{Binding IsRendering, Converter={StaticResource BoolToVisibility}}" />
+              </StackPanel>
+            </ScrollViewer>
+          </TabItem>
+
+          <!-- ==================== 滤镜 ==================== -->
+          <TabItem Header="滤镜">
+            <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+              <StackPanel Margin="14,12">
+
+                <TextBlock Text="一键滤镜" FontSize="14" FontWeight="SemiBold"
+                           Foreground="{DynamicResource ChromeForegroundBrush}" />
+                <StackPanel Orientation="Horizontal" Margin="0,8,0,0">
+                  <Button Content="反色" MinWidth="64" Style="{StaticResource ToolbarButtonStyle}"
+                          Command="{Binding InvertCommand}" />
+                  <Button Content="灰度" MinWidth="64" Style="{StaticResource ToolbarButtonStyle}"
+                          Command="{Binding GrayscaleCommand}" />
+                </StackPanel>
+
+                <DockPanel Margin="0,14,0,0" LastChildFill="False">
+                  <TextBlock DockPanel.Dock="Left" Text="二值化阈值" Style="{StaticResource StatusLabelStyle}" Margin="0" />
+                  <TextBlock DockPanel.Dock="Right" MinWidth="34" TextAlignment="Right"
+                             Style="{StaticResource StatusTextStyle}" Margin="0"
+                             Text="{Binding Threshold}" />
+                </DockPanel>
+                <Slider Minimum="0" Maximum="255" TickFrequency="16" SmallChange="1" LargeChange="16"
+                        IsEnabled="{Binding HasDocument}"
+                        Value="{Binding Threshold, Mode=TwoWay}" />
+                <Button Content="应用二值化" Style="{StaticResource ToolbarButtonStyle}"
+                        Margin="0,6,0,0" HorizontalAlignment="Left"
+                        Command="{Binding ThresholdCommand}" />
+
+                <Rectangle Height="1" Margin="0,14" Fill="{DynamicResource BorderBrush}" />
+
+                <TextBlock Text="模糊与锐化" FontSize="14" FontWeight="SemiBold"
+                           Foreground="{DynamicResource ChromeForegroundBrush}" />
+
+                <DockPanel Margin="0,8,0,0" LastChildFill="False">
+                  <TextBlock DockPanel.Dock="Left" Text="模糊半径" Style="{StaticResource StatusLabelStyle}" Margin="0" />
+                  <TextBlock DockPanel.Dock="Right" MinWidth="40" TextAlignment="Right"
+                             Style="{StaticResource StatusTextStyle}" Margin="0"
+                             Text="{Binding BlurRadius, StringFormat={}{0:0} px}" />
+                </DockPanel>
+                <Slider Minimum="0" Maximum="100" TickFrequency="5" SmallChange="0.5" LargeChange="5"
+                        IsEnabled="{Binding HasDocument}"
+                        Value="{Binding BlurRadius, Mode=TwoWay}" />
+                <Button Content="高斯模糊" Style="{StaticResource ToolbarButtonStyle}"
+                        Margin="0,6,0,0" HorizontalAlignment="Left"
+                        Command="{Binding BlurCommand}" />
+
+                <DockPanel Margin="0,12,0,0" LastChildFill="False">
+                  <TextBlock DockPanel.Dock="Left" Text="锐化强度" Style="{StaticResource StatusLabelStyle}" Margin="0" />
+                  <TextBlock DockPanel.Dock="Right" MinWidth="40" TextAlignment="Right"
+                             Style="{StaticResource StatusTextStyle}" Margin="0"
+                             Text="{Binding SharpenAmount, StringFormat={}{0:0}%}" />
+                </DockPanel>
+                <Slider Minimum="0" Maximum="400" TickFrequency="20" SmallChange="5" LargeChange="20"
+                        IsEnabled="{Binding HasDocument}"
+                        Value="{Binding SharpenAmount, Mode=TwoWay}" />
+
+                <DockPanel Margin="0,10,0,0" LastChildFill="False">
+                  <TextBlock DockPanel.Dock="Left" Text="锐化半径" Style="{StaticResource StatusLabelStyle}" Margin="0" />
+                  <TextBlock DockPanel.Dock="Right" MinWidth="40" TextAlignment="Right"
+                             Style="{StaticResource StatusTextStyle}" Margin="0"
+                             Text="{Binding SharpenRadius, StringFormat={}{0:0.#} px}" />
+                </DockPanel>
+                <Slider Minimum="0.5" Maximum="20" TickFrequency="0.5" SmallChange="0.5" LargeChange="1"
+                        IsEnabled="{Binding HasDocument}"
+                        Value="{Binding SharpenRadius, Mode=TwoWay}" />
+
+                <DockPanel Margin="0,10,0,0" LastChildFill="False">
+                  <TextBlock DockPanel.Dock="Left" Text="锐化阈值" Style="{StaticResource StatusLabelStyle}" Margin="0" />
+                  <TextBlock DockPanel.Dock="Right" MinWidth="34" TextAlignment="Right"
+                             Style="{StaticResource StatusTextStyle}" Margin="0"
+                             Text="{Binding SharpenThreshold}" />
+                </DockPanel>
+                <Slider Minimum="0" Maximum="64" TickFrequency="2" SmallChange="1" LargeChange="4"
+                        IsEnabled="{Binding HasDocument}"
+                        Value="{Binding SharpenThreshold, Mode=TwoWay}" />
+                <Button Content="USM 锐化" Style="{StaticResource ToolbarButtonStyle}"
+                        Margin="0,6,0,0" HorizontalAlignment="Left"
+                        Command="{Binding SharpenCommand}" />
+
+                <Rectangle Height="1" Margin="0,14" Fill="{DynamicResource BorderBrush}" />
+
+                <TextBlock Text="旋转与翻转" FontSize="14" FontWeight="SemiBold"
+                           Foreground="{DynamicResource ChromeForegroundBrush}" />
+                <WrapPanel Margin="0,8,0,0">
+                  <Button Content="↺ 逆时针" Style="{StaticResource ToolbarButtonStyle}"
+                          Command="{Binding RotateCounterClockwiseCommand}" />
+                  <Button Content="↻ 顺时针" Style="{StaticResource ToolbarButtonStyle}"
+                          Command="{Binding RotateClockwiseCommand}" />
+                  <Button Content="180°" Style="{StaticResource ToolbarButtonStyle}"
+                          Command="{Binding Rotate180Command}" />
+                  <Button Content="水平翻转" Style="{StaticResource ToolbarButtonStyle}"
+                          Command="{Binding FlipHorizontalCommand}" />
+                  <Button Content="垂直翻转" Style="{StaticResource ToolbarButtonStyle}"
+                          Command="{Binding FlipVerticalCommand}" />
+                </WrapPanel>
+
+                <Rectangle Height="1" Margin="0,14" Fill="{DynamicResource BorderBrush}" />
+
+                <TextBlock Text="裁剪" FontSize="14" FontWeight="SemiBold"
+                           Foreground="{DynamicResource ChromeForegroundBrush}" />
+                <TextBlock Text="进入后在画布上拖动边框，内置三分线辅助"
+                           Margin="0,4,0,0" FontSize="11" TextWrapping="Wrap"
+                           Foreground="{DynamicResource SubtleForegroundBrush}" />
+                <StackPanel Orientation="Horizontal" Margin="0,8,0,0">
+                  <Button Content="开始裁剪" Style="{StaticResource ToolbarButtonStyle}"
+                          Command="{Binding BeginCropCommand}" />
+                  <Button Content="应用裁剪" Style="{StaticResource ToolbarButtonStyle}"
+                          Command="{Binding ApplyCropCommand}" />
+                  <Button Content="取消" Style="{StaticResource ToolbarButtonStyle}"
+                          Command="{Binding CancelCropCommand}" />
+                </StackPanel>
+                <TextBlock Text="{Binding CropInfoText}" Margin="0,8,0,0" FontSize="11" TextWrapping="Wrap"
+                           Foreground="{DynamicResource AccentBrush}" />
+              </StackPanel>
+            </ScrollViewer>
+          </TabItem>
+
+          <!-- ==================== 边框与文字 ==================== -->
+          <TabItem Header="边框文字">
+            <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+              <StackPanel Margin="14,12">
+
+                <TextBlock Text="边框" FontSize="14" FontWeight="SemiBold"
+                           Foreground="{DynamicResource ChromeForegroundBrush}" />
+
+                <TextBlock Text="样式" Margin="0,8,0,0" Style="{StaticResource StatusLabelStyle}" />
+                <ComboBox SelectedIndex="{Binding BorderStyleIndex, Mode=TwoWay}"
+                          IsEnabled="{Binding HasDocument}">
+                  <ComboBoxItem Content="实线边框" />
+                  <ComboBoxItem Content="内衬相框" />
+                  <ComboBoxItem Content="柔和阴影" />
+                </ComboBox>
+
+                <DockPanel Margin="0,12,0,0" LastChildFill="False">
+                  <TextBlock DockPanel.Dock="Left" Text="边框宽度" Style="{StaticResource StatusLabelStyle}" Margin="0" />
+                  <TextBlock DockPanel.Dock="Right" MinWidth="40" TextAlignment="Right"
+                             Style="{StaticResource StatusTextStyle}" Margin="0"
+                             Text="{Binding BorderWidth, StringFormat={}{0} px}" />
+                </DockPanel>
+                <Slider Minimum="1" Maximum="200" TickFrequency="4" SmallChange="1" LargeChange="10"
+                        IsEnabled="{Binding HasDocument}"
+                        Value="{Binding BorderWidth, Mode=TwoWay}" />
+
+                <TextBlock Text="颜色" Margin="0,12,0,0" Style="{StaticResource StatusLabelStyle}" />
+                <WrapPanel Margin="0,4,0,0">
+                  <Button Content="白色" Style="{StaticResource ToolbarButtonStyle}" Click="OnBorderColorWhite" />
+                  <Button Content="黑色" Style="{StaticResource ToolbarButtonStyle}" Click="OnBorderColorBlack" />
+                  <Button Content="浅灰" Style="{StaticResource ToolbarButtonStyle}" Click="OnBorderColorGray" />
+                  <Button Content="米色" Style="{StaticResource ToolbarButtonStyle}" Click="OnBorderColorCream" />
+                </WrapPanel>
+                <TextBlock Text="当前颜色" Margin="0,8,0,0" FontSize="11"
+                           Foreground="{DynamicResource SubtleForegroundBrush}" />
+                <Rectangle Height="20" Margin="0,4,0,0" RadiusX="3" RadiusY="3"
+                           Fill="{Binding BorderColorBrush}"
+                           Stroke="{DynamicResource BorderBrush}" />
+
+                <Button Content="添加边框" Style="{StaticResource ToolbarButtonStyle}"
+                        Margin="0,10,0,0" HorizontalAlignment="Left"
+                        Command="{Binding ApplyBorderCommand}" />
+
+                <Rectangle Height="1" Margin="0,16" Fill="{DynamicResource BorderBrush}" />
+
+                <TextBlock Text="文字" FontSize="14" FontWeight="SemiBold"
+                           Foreground="{DynamicResource ChromeForegroundBrush}" />
+
+                <TextBlock Text="内容" Margin="0,8,0,0" Style="{StaticResource StatusLabelStyle}" />
+                <TextBox Text="{Binding TextContent, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                         IsEnabled="{Binding HasDocument}" />
+
+                <TextBlock Text="字体" Margin="0,10,0,0" Style="{StaticResource StatusLabelStyle}" />
+                <TextBox Text="{Binding TextFontFamily, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                         IsEnabled="{Binding HasDocument}" />
+
+                <DockPanel Margin="0,10,0,0" LastChildFill="False">
+                  <TextBlock DockPanel.Dock="Left" Text="字号" Style="{StaticResource StatusLabelStyle}" Margin="0" />
+                  <TextBlock DockPanel.Dock="Right" MinWidth="40" TextAlignment="Right"
+                             Style="{StaticResource StatusTextStyle}" Margin="0"
+                             Text="{Binding TextFontSize, StringFormat={}{0:0} px}" />
+                </DockPanel>
+                <Slider Minimum="8" Maximum="200" TickFrequency="4" SmallChange="1" LargeChange="8"
+                        IsEnabled="{Binding HasDocument}"
+                        Value="{Binding TextFontSize, Mode=TwoWay}" />
+
+                <TextBlock Text="位置" Margin="0,10,0,0" Style="{StaticResource StatusLabelStyle}" />
+                <ComboBox SelectedIndex="{Binding TextAnchorIndex, Mode=TwoWay}"
+                          IsEnabled="{Binding HasDocument}">
+                  <ComboBoxItem Content="左上" />
+                  <ComboBoxItem Content="上中" />
+                  <ComboBoxItem Content="右上" />
+                  <ComboBoxItem Content="左中" />
+                  <ComboBoxItem Content="居中" />
+                  <ComboBoxItem Content="右中" />
+                  <ComboBoxItem Content="左下" />
+                  <ComboBoxItem Content="下中" />
+                  <ComboBoxItem Content="右下" />
+                </ComboBox>
+
+                <StackPanel Orientation="Horizontal" Margin="0,10,0,0">
+                  <CheckBox Content="加粗" IsChecked="{Binding TextBold, Mode=TwoWay}"
+                            IsEnabled="{Binding HasDocument}"
+                            Foreground="{DynamicResource ChromeForegroundBrush}" />
+                  <CheckBox Content="斜体" Margin="12,0,0,0" IsChecked="{Binding TextItalic, Mode=TwoWay}"
+                            IsEnabled="{Binding HasDocument}"
+                            Foreground="{DynamicResource ChromeForegroundBrush}" />
+                  <CheckBox Content="投影" Margin="12,0,0,0" IsChecked="{Binding TextShadow, Mode=TwoWay}"
+                            IsEnabled="{Binding HasDocument}"
+                            Foreground="{DynamicResource ChromeForegroundBrush}" />
+                </StackPanel>
+
+                <WrapPanel Margin="0,10,0,0">
+                  <Button Content="白色" Style="{StaticResource ToolbarButtonStyle}" Click="OnTextColorWhite" />
+                  <Button Content="黑色" Style="{StaticResource ToolbarButtonStyle}" Click="OnTextColorBlack" />
+                  <Button Content="黄色" Style="{StaticResource ToolbarButtonStyle}" Click="OnTextColorYellow" />
+                  <Button Content="红色" Style="{StaticResource ToolbarButtonStyle}" Click="OnTextColorRed" />
+                </WrapPanel>
+
+                <Button Content="添加文字" Style="{StaticResource ToolbarButtonStyle}"
+                        Margin="0,12,0,0" HorizontalAlignment="Left"
+                        Command="{Binding ApplyTextCommand}" />
+              </StackPanel>
+            </ScrollViewer>
+          </TabItem>
+
+          <!-- ==================== 打印 ==================== -->
+          <TabItem Header="打印">
+            <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+              <StackPanel Margin="14,12">
+
+                <TextBlock Text="打印当前图片" FontSize="14" FontWeight="SemiBold"
+                           Foreground="{DynamicResource ChromeForegroundBrush}" />
+                <TextBlock Text="打印输出使用图片原始 DPI，不会因屏幕缩放而模糊"
+                           Margin="0,4,0,0" FontSize="11" TextWrapping="Wrap"
+                           Foreground="{DynamicResource SubtleForegroundBrush}" />
+                <StackPanel Orientation="Horizontal" Margin="0,10,0,0">
+                  <Button Content="打印预览…" MinWidth="92" Style="{StaticResource ToolbarButtonStyle}"
+                          Command="{Binding PrintPreviewCommand}" />
+                  <Button Content="直接打印" MinWidth="82" Style="{StaticResource ToolbarButtonStyle}"
+                          Command="{Binding PrintCommand}" />
+                </StackPanel>
+
+                <Rectangle Height="1" Margin="0,16" Fill="{DynamicResource BorderBrush}" />
+
+                <TextBlock Text="批量打印" FontSize="14" FontWeight="SemiBold"
+                           Foreground="{DynamicResource ChromeForegroundBrush}" />
+                <TextBlock Text="队列中的图片会依次送到打印机；每张一个打印作业，互不影响"
+                           Margin="0,4,0,0" FontSize="11" TextWrapping="Wrap"
+                           Foreground="{DynamicResource SubtleForegroundBrush}" />
+
+                <StackPanel Orientation="Horizontal" Margin="0,10,0,0">
+                  <Button Content="加入当前图" MinWidth="86" Style="{StaticResource ToolbarButtonStyle}"
+                          Command="{Binding AddCurrentToBatchCommand}" />
+                  <Button Content="添加文件…" MinWidth="86" Style="{StaticResource ToolbarButtonStyle}"
+                          Command="{Binding AddFilesToBatchCommand}" />
+                </StackPanel>
+
+                <ListBox x:Name="BatchList"
+                         Height="180"
+                         Margin="0,10,0,0"
+                         ItemsSource="{Binding BatchItems}"
+                         DisplayMemberPath="FileName"
+                         IsEnabled="{Binding IsBatchPrinting, Converter={StaticResource BoolToVisibility}, ConverterParameter=invert}" />
+
+                <StackPanel Orientation="Horizontal" Margin="0,8,0,0">
+                  <Button Content="移除选中" MinWidth="82" Style="{StaticResource ToolbarButtonStyle}"
+                          Command="{Binding RemoveBatchItemCommand}"
+                          CommandParameter="{Binding SelectedItem, ElementName=BatchList}" />
+                  <Button Content="清空" MinWidth="60" Style="{StaticResource ToolbarButtonStyle}"
+                          Command="{Binding ClearBatchCommand}" />
+                  <Button Content="开始打印" MinWidth="86" Style="{StaticResource ToolbarButtonStyle}"
+                          Command="{Binding StartBatchPrintCommand}" />
+                </StackPanel>
+
+                <TextBlock Text="{Binding BatchProgressText}" Margin="0,10,0,0" FontSize="11"
+                           TextWrapping="Wrap"
+                           Foreground="{DynamicResource AccentBrush}" />
+
+                <ProgressBar Height="6" Margin="0,6,0,0"
+                             IsIndeterminate="True"
+                             Visibility="{Binding IsBatchPrinting, Converter={StaticResource BoolToVisibility}}" />
+              </StackPanel>
+            </ScrollViewer>
+          </TabItem>
+        </TabControl>
+      </Border>
+    </Grid>
+
+    <!-- ==================== 状态栏 ==================== -->
+    <Border Grid.Row="3"
+            Background="{DynamicResource StatusBarBackgroundBrush}"
+            BorderBrush="{DynamicResource BorderBrush}"
+            BorderThickness="0,1,0,0">
+      <Grid Margin="4,3">
+        <Grid.ColumnDefinitions>
+          <ColumnDefinition Width="*" />
+          <ColumnDefinition Width="Auto" />
+          <ColumnDefinition Width="Auto" />
+        </Grid.ColumnDefinitions>
+
+        <TextBlock Grid.Column="0"
+                   Style="{StaticResource StatusTextStyle}"
+                   Text="{Binding StatusText}"
+                   ToolTip="{Binding StatusText}" />
+
+        <!-- 进度反馈：只有耗时操作（>200ms）才会显示（需求 P3-15） -->
+        <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center"
+                    Margin="8,0"
+                    Visibility="{Binding IsProgressVisible, Converter={StaticResource BoolToVisibility}}">
+          <ProgressBar Width="140" Height="8" Minimum="0" Maximum="100"
+                       Value="{Binding ProgressValue, Mode=OneWay}" />
+          <TextBlock Text="{Binding ProgressText}" Margin="8,0,0,0" FontSize="11"
+                     VerticalAlignment="Center"
+                     Foreground="{DynamicResource AccentBrush}" />
+        </StackPanel>
+
+        <StackPanel Grid.Column="2" Orientation="Horizontal">
+          <TextBlock Style="{StaticResource StatusLabelStyle}" Text="尺寸" />
+          <TextBlock Style="{StaticResource StatusTextStyle}" Text="{Binding PixelSizeText}" />
+          <Rectangle Style="{StaticResource ToolbarSeparatorStyle}" Margin="4,5" />
+          <TextBlock Style="{StaticResource StatusLabelStyle}" Text="DPI" />
+          <TextBlock Style="{StaticResource StatusTextStyle}" Text="{Binding DpiText}" />
+          <Rectangle Style="{StaticResource ToolbarSeparatorStyle}" Margin="4,5" />
+          <TextBlock Style="{StaticResource StatusLabelStyle}" Text="文件" />
+          <TextBlock Style="{StaticResource StatusTextStyle}" Text="{Binding FileSizeText}" />
+          <Rectangle Style="{StaticResource ToolbarSeparatorStyle}" Margin="4,5" />
+          <TextBlock Style="{StaticResource StatusLabelStyle}" Text="缩放" />
+          <TextBlock Style="{StaticResource ZoomTextStyle}" Text="{Binding ZoomPercentText}" />
+          <Rectangle Style="{StaticResource ToolbarSeparatorStyle}" Margin="4,5" />
+          <TextBlock Style="{StaticResource StatusLabelStyle}" Text="{Binding HistoryText}"
+                     ToolTip="{Binding HistoryText}" />
+        </StackPanel>
+      </Grid>
+    </Border>
+  </Grid>
+</Window>
