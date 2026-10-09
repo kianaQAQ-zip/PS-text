@@ -3,6 +3,8 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:conv="clr-namespace:PSText.Infrastructure.Converters"
         xmlns:behaviors="clr-namespace:PSText.Infrastructure.Behaviors"
+        xmlns:batch="clr-namespace:PSText.Services.Batch"
+        xmlns:filters="clr-namespace:PSText.Services.Filters"
         Title="{Binding WindowTitle}"
         Icon="pack://application:,,,/PS-text;component/Resources/PS-text.ico"
         Width="1180"
@@ -1121,6 +1123,411 @@
                 <ProgressBar Height="6" Margin="0,6,0,0"
                              IsIndeterminate="True"
                              Visibility="{Binding IsBatchPrinting, Converter={StaticResource BoolToVisibility}}" />
+              </StackPanel>
+            </ScrollViewer>
+          </TabItem>
+
+          <!-- ==================== 批量流水线 ==================== -->
+          <TabItem Header="批量">
+            <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+              <StackPanel Margin="14,12">
+
+                <TextBlock Text="批量流水线" FontSize="14" FontWeight="SemiBold"
+                           Foreground="{DynamicResource ChromeForegroundBrush}" />
+                <TextBlock Text="一套参数套到多张图上，导出为新文件；原文件不会被改动"
+                           Margin="0,4,0,0" FontSize="11" TextWrapping="Wrap"
+                           Foreground="{DynamicResource SubtleForegroundBrush}" />
+
+                <!-- ===== 1. 来源 ===== -->
+                <TextBlock Text="1. 待处理的图片" Margin="0,14,0,0" Style="{StaticResource StatusLabelStyle}" />
+
+                <WrapPanel Margin="0,4,0,0">
+                  <Button Content="添加文件…" MinWidth="80" Style="{StaticResource ToolbarButtonStyle}"
+                          Command="{Binding AddBatchFilesCommand}" />
+                  <Button Content="添加文件夹…" MinWidth="86" Style="{StaticResource ToolbarButtonStyle}"
+                          Command="{Binding AddBatchFolderCommand}" />
+                  <Button Content="加上当前图" MinWidth="80" Style="{StaticResource ToolbarButtonStyle}"
+                          Command="{Binding AddCurrentBatchItemCommand}" />
+                </WrapPanel>
+
+                <CheckBox Content="添加文件夹时包含子文件夹" Margin="0,6,0,0"
+                          IsChecked="{Binding BatchIncludeSubfolders, Mode=TwoWay}"
+                          Foreground="{DynamicResource ChromeForegroundBrush}" />
+
+                <ListBox x:Name="BatchQueueList" Height="118" Margin="0,8,0,0"
+                         ItemsSource="{Binding BatchQueue}"
+                         SelectedItem="{Binding SelectedBatchItem, Mode=TwoWay}">
+                  <ListBox.ItemTemplate>
+                    <DataTemplate>
+                      <StackPanel>
+                        <TextBlock x:Name="QueueItemName" Text="{Binding FileName}"
+                                   TextTrimming="CharacterEllipsis" />
+                        <TextBlock Text="{Binding Status}" FontSize="10" TextWrapping="Wrap"
+                                   Foreground="{DynamicResource SubtleForegroundBrush}" />
+                      </StackPanel>
+                      <DataTemplate.Triggers>
+                        <DataTrigger Binding="{Binding IsFailed}" Value="True">
+                          <Setter TargetName="QueueItemName" Property="Foreground" Value="#E03A3A" />
+                        </DataTrigger>
+                      </DataTemplate.Triggers>
+                    </DataTemplate>
+                  </ListBox.ItemTemplate>
+                </ListBox>
+
+                <WrapPanel Margin="0,6,0,0">
+                  <Button Content="移除选中" MinWidth="74" Style="{StaticResource ToolbarButtonStyle}"
+                          Command="{Binding RemoveBatchQueueItemCommand}"
+                          CommandParameter="{Binding SelectedItem, ElementName=BatchQueueList}" />
+                  <Button Content="清空队列" MinWidth="74" Style="{StaticResource ToolbarButtonStyle}"
+                          Command="{Binding ClearBatchQueueCommand}" />
+                </WrapPanel>
+
+                <Rectangle Height="1" Margin="0,14" Fill="{DynamicResource BorderBrush}" />
+
+                <!-- ===== 2. 流水线步骤 ===== -->
+                <TextBlock Text="2. 流水线（自上而下依次执行）" Style="{StaticResource StatusLabelStyle}" />
+                <TextBlock Text="顺序会影响结果：先加水印再缩放，水印会跟着一起变小"
+                           Margin="0,4,0,0" FontSize="11" TextWrapping="Wrap"
+                           Foreground="{DynamicResource SubtleForegroundBrush}" />
+
+                <DockPanel Margin="0,6,0,0" LastChildFill="True">
+                  <Button DockPanel.Dock="Right" Content="添加" MinWidth="54" Margin="6,0,0,0"
+                          Style="{StaticResource ToolbarButtonStyle}"
+                          Command="{Binding AddBatchStepCommand}" />
+                  <ComboBox ItemsSource="{Binding BatchStepKindOptions}"
+                            DisplayMemberPath="Name"
+                            SelectedValuePath="Kind"
+                            SelectedValue="{Binding BatchNewStepKind, Mode=TwoWay}" />
+                </DockPanel>
+
+                <ListBox x:Name="BatchStepList" Height="126" Margin="0,8,0,0"
+                         ItemsSource="{Binding BatchSteps}"
+                         SelectedItem="{Binding SelectedBatchStep, Mode=TwoWay}">
+                  <ListBox.ItemTemplate>
+                    <DataTemplate>
+                      <StackPanel Orientation="Horizontal">
+                        <TextBlock Text="{Binding OrderText}" MinWidth="18" FontWeight="SemiBold"
+                                   Foreground="{DynamicResource AccentBrush}" />
+                        <StackPanel>
+                          <TextBlock Text="{Binding DisplayName}" />
+                          <TextBlock Text="{Binding Summary}" FontSize="10" TextWrapping="Wrap"
+                                     Foreground="{DynamicResource SubtleForegroundBrush}" />
+                        </StackPanel>
+                      </StackPanel>
+                    </DataTemplate>
+                  </ListBox.ItemTemplate>
+                </ListBox>
+
+                <WrapPanel Margin="0,6,0,0">
+                  <Button Content="上移" MinWidth="52" Style="{StaticResource ToolbarButtonStyle}"
+                          Command="{Binding MoveBatchStepUpCommand}" />
+                  <Button Content="下移" MinWidth="52" Style="{StaticResource ToolbarButtonStyle}"
+                          Command="{Binding MoveBatchStepDownCommand}" />
+                  <Button Content="移除" MinWidth="52" Style="{StaticResource ToolbarButtonStyle}"
+                          Command="{Binding RemoveBatchStepCommand}" />
+                  <Button Content="清空" MinWidth="52" Style="{StaticResource ToolbarButtonStyle}"
+                          Command="{Binding ClearBatchStepsCommand}" />
+                </WrapPanel>
+
+                <TextBlock Text="{Binding BatchStepChainText}" Margin="0,8,0,0" FontSize="11" TextWrapping="Wrap"
+                           Foreground="{DynamicResource AccentBrush}" />
+
+                <!-- 步骤参数（按选中步骤类型切换） -->
+                <Border Margin="0,8,0,0" Padding="9" BorderThickness="1"
+                        BorderBrush="{DynamicResource BorderBrush}">
+                  <StackPanel>
+
+                    <TextBlock Text="选中「流水线」里的一步，即可在这里改它的参数"
+                               FontSize="11" TextWrapping="Wrap"
+                               Foreground="{DynamicResource SubtleForegroundBrush}"
+                               Visibility="{Binding HasSelectedBatchStep, Converter={StaticResource BoolToVisibility}, ConverterParameter=invert}" />
+
+                    <!-- 尺寸缩放 -->
+                    <StackPanel Visibility="{Binding IsResizeStepSelected, Converter={StaticResource BoolToVisibility}}">
+                      <TextBlock Text="约束方式" Style="{StaticResource StatusLabelStyle}" />
+                      <ComboBox SelectedValue="{Binding BatchResizeMode, Mode=TwoWay}" SelectedValuePath="Tag">
+                        <ComboBoxItem Content="约束长边" Tag="{x:Static batch:BatchResizeMode.LongEdge}" />
+                        <ComboBoxItem Content="约束宽度" Tag="{x:Static batch:BatchResizeMode.FitWidth}" />
+                        <ComboBoxItem Content="约束高度" Tag="{x:Static batch:BatchResizeMode.FitHeight}" />
+                        <ComboBoxItem Content="精确宽高（不保持比例）" Tag="{x:Static batch:BatchResizeMode.Exact}" />
+                        <ComboBoxItem Content="百分比" Tag="{x:Static batch:BatchResizeMode.Percent}" />
+                      </ComboBox>
+
+                      <Grid Margin="0,8,0,0">
+                        <Grid.ColumnDefinitions>
+                          <ColumnDefinition Width="*" />
+                          <ColumnDefinition Width="8" />
+                          <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
+                        <StackPanel Grid.Column="0">
+                          <TextBlock Text="长边 / 宽 / 高 / 百分比" Style="{StaticResource StatusLabelStyle}" />
+                          <TextBox Text="{Binding BatchResizeValue, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+                        </StackPanel>
+                        <StackPanel Grid.Column="2">
+                          <TextBlock Text="精确宽 × 高" Style="{StaticResource StatusLabelStyle}" />
+                          <StackPanel Orientation="Horizontal">
+                            <TextBox Width="58"
+                                     Text="{Binding BatchResizeWidth, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+                            <TextBlock Text="×" Margin="4,0" VerticalAlignment="Center"
+                                       Foreground="{DynamicResource SubtleForegroundBrush}" />
+                            <TextBox Width="58"
+                                     Text="{Binding BatchResizeHeight, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+                          </StackPanel>
+                        </StackPanel>
+                      </Grid>
+
+                      <TextBlock Text="插值方式" Margin="0,8,0,0" Style="{StaticResource StatusLabelStyle}" />
+                      <ComboBox SelectedValue="{Binding BatchResizeKernel, Mode=TwoWay}" SelectedValuePath="Tag">
+                        <ComboBoxItem Content="三次立方（推荐）" Tag="{x:Static filters:ResampleKernel.Bicubic}" />
+                        <ComboBoxItem Content="双线性（更快）" Tag="{x:Static filters:ResampleKernel.Bilinear}" />
+                        <ComboBoxItem Content="邻近（保留硬边）" Tag="{x:Static filters:ResampleKernel.NearestNeighbor}" />
+                      </ComboBox>
+
+                      <CheckBox Content="只缩不放（小图保持原样）" Margin="0,8,0,0"
+                                IsChecked="{Binding BatchResizeOnlyShrink, Mode=TwoWay}"
+                                Foreground="{DynamicResource ChromeForegroundBrush}" />
+                    </StackPanel>
+
+                    <!-- 基础调整 -->
+                    <StackPanel Visibility="{Binding IsAdjustmentStepSelected, Converter={StaticResource BoolToVisibility}}">
+                      <DockPanel LastChildFill="False">
+                        <TextBlock DockPanel.Dock="Left" Text="亮度" Style="{StaticResource StatusLabelStyle}" Margin="0" />
+                        <TextBlock DockPanel.Dock="Right" MinWidth="46" TextAlignment="Right"
+                                   Style="{StaticResource StatusTextStyle}" Margin="0"
+                                   Text="{Binding BatchAdjustBrightness, StringFormat={}{0:+0;-0;0}}" />
+                      </DockPanel>
+                      <Slider Minimum="-100" Maximum="100" TickFrequency="5"
+                              Value="{Binding BatchAdjustBrightness, Mode=TwoWay}" />
+
+                      <DockPanel LastChildFill="False" Margin="0,6,0,0">
+                        <TextBlock DockPanel.Dock="Left" Text="对比度" Style="{StaticResource StatusLabelStyle}" Margin="0" />
+                        <TextBlock DockPanel.Dock="Right" MinWidth="46" TextAlignment="Right"
+                                   Style="{StaticResource StatusTextStyle}" Margin="0"
+                                   Text="{Binding BatchAdjustContrast, StringFormat={}{0:+0;-0;0}}" />
+                      </DockPanel>
+                      <Slider Minimum="-100" Maximum="100" TickFrequency="5"
+                              Value="{Binding BatchAdjustContrast, Mode=TwoWay}" />
+
+                      <DockPanel LastChildFill="False" Margin="0,6,0,0">
+                        <TextBlock DockPanel.Dock="Left" Text="饱和度" Style="{StaticResource StatusLabelStyle}" Margin="0" />
+                        <TextBlock DockPanel.Dock="Right" MinWidth="46" TextAlignment="Right"
+                                   Style="{StaticResource StatusTextStyle}" Margin="0"
+                                   Text="{Binding BatchAdjustSaturation, StringFormat={}{0:+0;-0;0}}" />
+                      </DockPanel>
+                      <Slider Minimum="-100" Maximum="100" TickFrequency="5"
+                              Value="{Binding BatchAdjustSaturation, Mode=TwoWay}" />
+
+                      <DockPanel LastChildFill="False" Margin="0,6,0,0">
+                        <TextBlock DockPanel.Dock="Left" Text="色温" Style="{StaticResource StatusLabelStyle}" Margin="0" />
+                        <TextBlock DockPanel.Dock="Right" MinWidth="46" TextAlignment="Right"
+                                   Style="{StaticResource StatusTextStyle}" Margin="0"
+                                   Text="{Binding BatchAdjustTemperature, StringFormat={}{0:+0;-0;0}}" />
+                      </DockPanel>
+                      <Slider Minimum="-100" Maximum="100" TickFrequency="5"
+                              Value="{Binding BatchAdjustTemperature, Mode=TwoWay}" />
+                    </StackPanel>
+
+                    <!-- 翻转旋转 -->
+                    <StackPanel Visibility="{Binding IsFlipRotateStepSelected, Converter={StaticResource BoolToVisibility}}">
+                      <TextBlock Text="旋转（顺时针，无损）" Style="{StaticResource StatusLabelStyle}" />
+                      <ComboBox SelectedValue="{Binding BatchRotateAngle, Mode=TwoWay}" SelectedValuePath="Tag">
+                        <ComboBoxItem Content="不旋转" Tag="{x:Static filters:RotationAngle.None}" />
+                        <ComboBoxItem Content="顺时针 90°" Tag="{x:Static filters:RotationAngle.Clockwise90}" />
+                        <ComboBoxItem Content="旋转 180°" Tag="{x:Static filters:RotationAngle.Clockwise180}" />
+                        <ComboBoxItem Content="顺时针 270°" Tag="{x:Static filters:RotationAngle.Clockwise270}" />
+                      </ComboBox>
+
+                      <CheckBox Content="左右翻转" Margin="0,8,0,0"
+                                IsChecked="{Binding BatchFlipHorizontal, Mode=TwoWay}"
+                                Foreground="{DynamicResource ChromeForegroundBrush}" />
+                      <CheckBox Content="上下翻转" Margin="0,6,0,0"
+                                IsChecked="{Binding BatchFlipVertical, Mode=TwoWay}"
+                                Foreground="{DynamicResource ChromeForegroundBrush}" />
+                    </StackPanel>
+
+                    <!-- 边框 -->
+                    <StackPanel Visibility="{Binding IsBorderStepSelected, Converter={StaticResource BoolToVisibility}}">
+                      <TextBlock Text="样式" Style="{StaticResource StatusLabelStyle}" />
+                      <ComboBox SelectedValue="{Binding BatchBorderStyle, Mode=TwoWay}" SelectedValuePath="Tag">
+                        <ComboBoxItem Content="实线" Tag="{x:Static filters:BorderStyle.Solid}" />
+                        <ComboBoxItem Content="内白外黑" Tag="{x:Static filters:BorderStyle.InnerLine}" />
+                        <ComboBoxItem Content="柔和阴影" Tag="{x:Static filters:BorderStyle.Shadow}" />
+                      </ComboBox>
+
+                      <TextBlock Text="宽度（像素）" Margin="0,8,0,0" Style="{StaticResource StatusLabelStyle}" />
+                      <TextBox Text="{Binding BatchBorderWidth, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+
+                      <TextBlock Text="{Binding BatchBorderColorText}" Margin="0,8,0,0" FontSize="11"
+                                 Foreground="{DynamicResource SubtleForegroundBrush}" />
+                      <WrapPanel Margin="0,4,0,0">
+                        <Button Content="白" MinWidth="34" Style="{StaticResource ToolbarButtonStyle}"
+                                Click="OnBatchBorderColorWhite" />
+                        <Button Content="黑" MinWidth="34" Style="{StaticResource ToolbarButtonStyle}"
+                                Click="OnBatchBorderColorBlack" />
+                        <Button Content="米" MinWidth="34" Style="{StaticResource ToolbarButtonStyle}"
+                                Click="OnBatchBorderColorCream" />
+                        <Button Content="灰" MinWidth="34" Style="{StaticResource ToolbarButtonStyle}"
+                                Click="OnBatchBorderColorGray" />
+                      </WrapPanel>
+                    </StackPanel>
+
+                    <!-- 文字水印 -->
+                    <StackPanel Visibility="{Binding IsWatermarkStepSelected, Converter={StaticResource BoolToVisibility}}">
+                      <TextBlock Text="水印文字" Style="{StaticResource StatusLabelStyle}" />
+                      <TextBox Text="{Binding BatchWatermarkText, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+
+                      <TextBlock Text="字号计量方式" Margin="0,8,0,0" Style="{StaticResource StatusLabelStyle}" />
+                      <ComboBox SelectedValue="{Binding BatchWatermarkFontSizeMode, Mode=TwoWay}" SelectedValuePath="Tag">
+                        <ComboBoxItem Content="按图像宽度百分比（推荐）"
+                                      Tag="{x:Static batch:WatermarkSizeMode.RelativeToWidth}" />
+                        <ComboBoxItem Content="固定像素" Tag="{x:Static batch:WatermarkSizeMode.Absolute}" />
+                      </ComboBox>
+                      <TextBlock Text="批量图的尺寸常常不一致：固定像素会让大图上水印看不见、小图上占满屏"
+                                 Margin="0,4,0,0" FontSize="11" TextWrapping="Wrap"
+                                 Foreground="{DynamicResource SubtleForegroundBrush}" />
+
+                      <Grid Margin="0,8,0,0">
+                        <Grid.ColumnDefinitions>
+                          <ColumnDefinition Width="*" />
+                          <ColumnDefinition Width="8" />
+                          <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
+                        <StackPanel Grid.Column="0">
+                          <TextBlock Text="字号" Style="{StaticResource StatusLabelStyle}" />
+                          <TextBox Text="{Binding BatchWatermarkFontSize, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+                        </StackPanel>
+                        <StackPanel Grid.Column="2">
+                          <TextBlock Text="边距" Style="{StaticResource StatusLabelStyle}" />
+                          <TextBox Text="{Binding BatchWatermarkMargin, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+                        </StackPanel>
+                      </Grid>
+
+                      <DockPanel LastChildFill="False" Margin="0,8,0,0">
+                        <TextBlock DockPanel.Dock="Left" Text="不透明度" Style="{StaticResource StatusLabelStyle}" Margin="0" />
+                        <TextBlock DockPanel.Dock="Right" MinWidth="46" TextAlignment="Right"
+                                   Style="{StaticResource StatusTextStyle}" Margin="0"
+                                   Text="{Binding BatchWatermarkOpacity}" />
+                      </DockPanel>
+                      <Slider Minimum="0" Maximum="255" TickFrequency="5"
+                              Value="{Binding BatchWatermarkOpacity, Mode=TwoWay}" />
+
+                      <TextBlock Text="位置" Margin="0,8,0,0" Style="{StaticResource StatusLabelStyle}" />
+                      <ComboBox SelectedValue="{Binding BatchWatermarkAnchor, Mode=TwoWay}" SelectedValuePath="Tag">
+                        <ComboBoxItem Content="左上" Tag="{x:Static filters:TextAnchor.TopLeft}" />
+                        <ComboBoxItem Content="上中" Tag="{x:Static filters:TextAnchor.TopCenter}" />
+                        <ComboBoxItem Content="右上" Tag="{x:Static filters:TextAnchor.TopRight}" />
+                        <ComboBoxItem Content="左中" Tag="{x:Static filters:TextAnchor.MiddleLeft}" />
+                        <ComboBoxItem Content="居中" Tag="{x:Static filters:TextAnchor.Center}" />
+                        <ComboBoxItem Content="右中" Tag="{x:Static filters:TextAnchor.MiddleRight}" />
+                        <ComboBoxItem Content="左下" Tag="{x:Static filters:TextAnchor.BottomLeft}" />
+                        <ComboBoxItem Content="下中" Tag="{x:Static filters:TextAnchor.BottomCenter}" />
+                        <ComboBoxItem Content="右下" Tag="{x:Static filters:TextAnchor.BottomRight}" />
+                      </ComboBox>
+
+                      <CheckBox Content="加粗" Margin="0,8,0,0"
+                                IsChecked="{Binding BatchWatermarkBold, Mode=TwoWay}"
+                                Foreground="{DynamicResource ChromeForegroundBrush}" />
+                      <CheckBox Content="加深色投影（浅底更清楚，深底会变脏）" Margin="0,6,0,0"
+                                IsChecked="{Binding BatchWatermarkShadow, Mode=TwoWay}"
+                                Foreground="{DynamicResource ChromeForegroundBrush}" />
+
+                      <TextBlock Text="{Binding BatchWatermarkColorText}" Margin="0,8,0,0" FontSize="11"
+                                 Foreground="{DynamicResource SubtleForegroundBrush}" />
+                      <WrapPanel Margin="0,4,0,0">
+                        <Button Content="白" MinWidth="34" Style="{StaticResource ToolbarButtonStyle}"
+                                Click="OnBatchWatermarkColorWhite" />
+                        <Button Content="黑" MinWidth="34" Style="{StaticResource ToolbarButtonStyle}"
+                                Click="OnBatchWatermarkColorBlack" />
+                        <Button Content="灰" MinWidth="34" Style="{StaticResource ToolbarButtonStyle}"
+                                Click="OnBatchWatermarkColorGray" />
+                        <Button Content="黄" MinWidth="34" Style="{StaticResource ToolbarButtonStyle}"
+                                Click="OnBatchWatermarkColorYellow" />
+                        <Button Content="红" MinWidth="34" Style="{StaticResource ToolbarButtonStyle}"
+                                Click="OnBatchWatermarkColorRed" />
+                      </WrapPanel>
+                    </StackPanel>
+
+                  </StackPanel>
+                </Border>
+
+                <Rectangle Height="1" Margin="0,14" Fill="{DynamicResource BorderBrush}" />
+
+                <!-- ===== 3. 预览 ===== -->
+                <TextBlock Text="3. 效果预览" Style="{StaticResource StatusLabelStyle}" />
+                <Border Margin="0,6,0,0" MinHeight="88" BorderThickness="1"
+                        BorderBrush="{DynamicResource BorderBrush}"
+                        Background="{DynamicResource CheckerboardBrush}">
+                  <Grid>
+                    <Image Source="{Binding BatchPreviewImage}" Stretch="Uniform"
+                           MaxHeight="210" Margin="4" />
+                    <TextBlock Text="在队列里选一张图片即可预览"
+                               HorizontalAlignment="Center" VerticalAlignment="Center"
+                               FontSize="11" TextWrapping="Wrap" Margin="8"
+                               Foreground="{DynamicResource SubtleForegroundBrush}"
+                               Visibility="{Binding HasBatchPreviewImage, Converter={StaticResource BoolToVisibility}, ConverterParameter=invert}" />
+                  </Grid>
+                </Border>
+                <TextBlock Text="{Binding BatchPreviewText}" Margin="0,6,0,0" FontSize="11" TextWrapping="Wrap"
+                           Foreground="{DynamicResource SubtleForegroundBrush}" />
+                <Button Content="刷新预览" Margin="0,6,0,0" HorizontalAlignment="Left" MinWidth="74"
+                        Style="{StaticResource ToolbarButtonStyle}"
+                        Command="{Binding RefreshBatchPreviewCommand}" />
+
+                <Rectangle Height="1" Margin="0,14" Fill="{DynamicResource BorderBrush}" />
+
+                <!-- ===== 4. 输出 ===== -->
+                <TextBlock Text="4. 输出" Style="{StaticResource StatusLabelStyle}" />
+
+                <DockPanel Margin="0,6,0,0" LastChildFill="True">
+                  <Button DockPanel.Dock="Right" Content="浏览…" MinWidth="56" Margin="6,0,0,0"
+                          Style="{StaticResource ToolbarButtonStyle}"
+                          Command="{Binding BrowseBatchOutputDirectoryCommand}" />
+                  <TextBox Text="{Binding BatchOutputDirectory, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+                </DockPanel>
+
+                <TextBlock Text="格式" Margin="0,8,0,0" Style="{StaticResource StatusLabelStyle}" />
+                <ComboBox ItemsSource="{Binding BatchOutputFormatOptions}"
+                          DisplayMemberPath="Name"
+                          SelectedItem="{Binding BatchOutputFormat, Mode=TwoWay}" />
+
+                <DockPanel LastChildFill="False" Margin="0,8,0,0">
+                  <TextBlock DockPanel.Dock="Left" Text="JPEG 质量" Style="{StaticResource StatusLabelStyle}" Margin="0" />
+                  <TextBlock DockPanel.Dock="Right" MinWidth="40" TextAlignment="Right"
+                             Style="{StaticResource StatusTextStyle}" Margin="0"
+                             Text="{Binding BatchJpegQuality}" />
+                </DockPanel>
+                <Slider Minimum="1" Maximum="100" TickFrequency="1"
+                        IsEnabled="{Binding IsBatchQualityEnabled}"
+                        Value="{Binding BatchJpegQuality, Mode=TwoWay}" />
+
+                <TextBlock Text="文件名后缀" Margin="0,8,0,0" Style="{StaticResource StatusLabelStyle}" />
+                <TextBox Text="{Binding BatchFileNameSuffix, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+
+                <TextBlock Text="{Binding BatchOutputSummary}" Margin="0,8,0,0" FontSize="11" TextWrapping="Wrap"
+                           Foreground="{DynamicResource SubtleForegroundBrush}" />
+                <TextBlock Text="{Binding BatchTargetPathText}" Margin="0,4,0,0" FontSize="11" TextWrapping="Wrap"
+                           Foreground="{DynamicResource AccentBrush}" />
+
+                <Rectangle Height="1" Margin="0,14" Fill="{DynamicResource BorderBrush}" />
+
+                <!-- ===== 5. 执行 ===== -->
+                <WrapPanel>
+                  <Button Content="开始批量处理" MinWidth="104" Style="{StaticResource ToolbarButtonStyle}"
+                          Command="{Binding StartBatchRunCommand}" />
+                  <Button Content="取消" MinWidth="54" Style="{StaticResource ToolbarButtonStyle}"
+                          Command="{Binding CancelBatchRunCommand}" />
+                </WrapPanel>
+
+                <TextBlock Text="{Binding BatchRunProgressText}" Margin="0,10,0,0" FontSize="11" TextWrapping="Wrap"
+                           Foreground="{DynamicResource AccentBrush}" />
+
+                <ProgressBar Height="6" Margin="0,6,0,0" Minimum="0" Maximum="100"
+                             Value="{Binding ProgressValue, Mode=OneWay}"
+                             Visibility="{Binding IsBatchRunning, Converter={StaticResource BoolToVisibility}}" />
+
+                <TextBlock Text="批量处理只写新文件，原图不会被改动，因此没有「批量撤销」这一说 —— 重跑一次即可。"
+                           Margin="0,10,0,0" FontSize="11" TextWrapping="Wrap"
+                           Foreground="{DynamicResource SubtleForegroundBrush}" />
               </StackPanel>
             </ScrollViewer>
           </TabItem>

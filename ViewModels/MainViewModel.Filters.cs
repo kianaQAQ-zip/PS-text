@@ -275,9 +275,10 @@ namespace PSText.ViewModels
         }
 
         /// <summary>
-        /// 叠加文字。文字排版依赖 WPF 字体渲染，因此必须在 UI 线程构造 RenderTargetBitmap；
-        /// ApplyOneShotAsync 在 UI 线程上调用 transform，而 TextOverlayFilter 内部同步完成渲染，
-        /// 因此这里不需要额外切换线程。
+        /// 叠加文字。
+        /// 文字排版走 WPF 字体渲染（FormattedText / RenderTargetBitmap），
+        /// 它只要求"创建与使用在同一个线程"，并不要求是 UI 线程，
+        /// 因此 TextOverlayFilter.ApplyAsync 内部把它放到线程池执行，大图加字不会僵住界面。
         /// </summary>
         private void RunApplyText()
         {

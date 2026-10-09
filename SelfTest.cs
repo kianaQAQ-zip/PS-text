@@ -12,6 +12,7 @@ using PSText.Infrastructure.History;
 using PSText.Infrastructure.Imaging;
 using PSText.Models;
 using PSText.Services;
+using PSText.Services.Batch;
 using PSText.Services.Filters;
 using PSText.Services.Interfaces;
 using PSText.Services.Printing;
@@ -114,6 +115,7 @@ namespace PSText
                 CheckCloneStampEndToEnd(imageService, pngPath, ref checks, ref failures, log);
                 CheckAnnotationRendering(ref checks, ref failures, log);
                 CheckAnnotationEndToEnd(imageService, pngPath, ref checks, ref failures, log);
+                CheckBatchPipeline(imageService, tempRoot, ref checks, ref failures, log);
                 log.AppendLine();
             }
             catch (Exception ex)
@@ -6010,6 +6012,726 @@ namespace PSText
 
             log.AppendLine();
         }
+
+        /// <summary>
+        /// 校验批量流水线（M3）：
+        ///   A. 步骤顺序真的影响结果（先缩放后水印 vs 先水印后缩放，水印尺寸差一倍）
+        ///   B. BatchContext.Scale 只作用于"绝对像素"参数，不作用于百分比
+        ///   C. 输出命名：绝不覆盖磁盘上已有文件、绝不覆盖同一次运行已分配的名字、绝不覆盖源文件
+        ///   D. 整条含文字水印的流水线可以在**非 UI 线程**跑通（原先注释声称必须 UI 线程，实测不成立）
+        ///   E. 端到端：坏文件不影响其它文件；**预览推算的输出尺寸与实际输出一致**（预览不骗人）
+        /// </summary>
+        private static void CheckBatchPipeline(
+            IImageService imageService,
+            string tempRoot,
+            ref int checks,
+            ref int failures,
+            StringBuilder log)
+        {
+            log.AppendLine("[32] 批量流水线与输出命名");
+
+            try
+            {
+                CheckBatchStepOrder(ref checks, ref failures, log);
+                CheckBatchPreviewScale(ref checks, ref failures, log);
+                CheckBatchOutputNaming(tempRoot, ref checks, ref failures, log);
+                CheckBatchOffUiThread(ref checks, ref failures, log);
+                CheckBatchEndToEnd(imageService, tempRoot, ref checks, ref failures, log);
+            }
+            catch (Exception ex)
+            {
+                failures++;
+                log.AppendLine("  FAIL 批量流水线测试异常: " + ex.GetType().Name + " " + ex.Message);
+            }
+
+            log.AppendLine();
+        }
+
+        #region [32] 分项
+
+        /// <summary>
+        /// A. 顺序语义。
+        ///
+        /// 用"水印亮区的包围盒宽度"作为度量：先缩放到 200 宽再画 40px 字，字占画布约 30%；
+        /// 先画 40px 字再把 400 宽缩到 200，字只剩约 15%。两者相差约一倍 ——
+        /// 这就是"顺序不是实现细节"的可观测证据。
+        /// </summary>
+        private static void CheckBatchStepOrder(ref int checks, ref int failures, StringBuilder log)
+        {
+            // 深底 + 纯白不透明字，方便按亮度阈值量出字的范围
+            PixelBuffer source = CreateSolidBuffer(400, 300, 20, 20, 20);
+
+            BatchResizeStep resize = new BatchResizeStep
+            {
+                Mode = BatchResizeMode.LongEdge,
+                Value = 200,
+                OnlyShrink = false,
+                Kernel = ResampleKernel.Bicubic
+            };
+
+            BatchWatermarkStep watermark = new BatchWatermarkStep
+            {
+                Text = "WM",
+                SizeMode = WatermarkSizeMode.Absolute,
+                FontSize = 40.0,
+                Anchor = TextAnchor.Center,
+                Margin = 0.0,
+                Opacity = 255,
+                Shadow = false,
+                Bold = true
+            };
+
+            List<IBatchStep> resizeThenMark = new List<IBatchStep> { resize, watermark };
+            List<IBatchStep> markThenResize = new List<IBatchStep>
+            {
+                watermark.Clone(),
+                (IBatchStep)resize.Clone()
+            };
+
+            PixelBuffer a = BatchPipeliner.Run(source, resizeThenMark, BatchContext.FullResolution, System.Threading.CancellationToken.None);
+            PixelBuffer b = BatchPipeliner.Run(source, markThenResize, BatchContext.FullResolution, System.Threading.CancellationToken.None);
+
+            checks++;
+            if (a.Width != 200 || a.Height != 150 || b.Width != 200 || b.Height != 150)
+            {
+                failures++;
+                log.AppendLine(string.Format("  FAIL 两种顺序的输出尺寸都应收缩到 200×150，实际 {0}×{1} / {2}×{3}",
+                    a.Width, a.Height, b.Width, b.Height));
+            }
+            else
+            {
+                log.AppendLine(string.Format("  OK   两种顺序输出尺寸一致（{0}×{1}）", a.Width, a.Height));
+            }
+
+            int widthA;
+            int heightA;
+            int widthB;
+            int heightB;
+            MeasureBrightBounds(a, 128, out widthA, out heightA);
+            MeasureBrightBounds(b, 128, out widthB, out heightB);
+
+            checks++;
+            if (widthA <= 0 || widthB <= 0)
+            {
+                failures++;
+                log.AppendLine(string.Format("  FAIL 两种顺序里都应能看到水印亮区，实测字宽 {0} / {1}", widthA, widthB));
+            }
+            else if (widthA < widthB * 1.5)
+            {
+                failures++;
+                log.AppendLine(string.Format(
+                    "  FAIL 顺序应当影响水印相对大小：先缩放后水印应明显更大（实测字宽 {0} vs {1}）",
+                    widthA, widthB));
+            }
+            else
+            {
+                log.AppendLine(string.Format(
+                    "  OK   顺序影响结果：先缩放后水印字宽 {0} px，先水印后缩放字宽 {1} px（约 {2:0.#} 倍）",
+                    widthA, widthB, widthA / (double)widthB));
+            }
+
+            checks++;
+            if (CountDifferentPixels(a.GetPixels(), b.GetPixels()) == 0)
+            {
+                failures++;
+                log.AppendLine("  FAIL 两种顺序的像素完全一致，说明顺序被忽略了");
+            }
+            else
+            {
+                log.AppendLine("  OK   两种顺序的像素不同（顺序确实生效）");
+            }
+        }
+
+        /// <summary>
+        /// B. 预览缩放只作用于绝对像素参数。
+        ///
+        /// 这条是"面板缩略图不骗人"的地基：绝对参数（长边、边框粗细）必须乘缩放因子，
+        /// 相对参数（百分比）必须**不**乘 —— 因为降采样不改变比例关系，乘了反而错。
+        /// </summary>
+        private static void CheckBatchPreviewScale(ref int checks, ref int failures, StringBuilder log)
+        {
+            BatchContext half = new BatchContext(0.5, 96.0, 96.0);
+
+            BatchResizeStep absolute = new BatchResizeStep
+            {
+                Mode = BatchResizeMode.LongEdge,
+                Value = 800,
+                OnlyShrink = false
+            };
+
+            int fullWidth;
+            int fullHeight;
+            int halfWidth;
+            int halfHeight;
+            absolute.ReadTargetSize(1600, 1200, BatchContext.FullResolution, out fullWidth, out fullHeight);
+            absolute.ReadTargetSize(1600, 1200, half, out halfWidth, out halfHeight);
+
+            checks++;
+            if (fullWidth != 800 || fullHeight != 600)
+            {
+                failures++;
+                log.AppendLine(string.Format("  FAIL 全分辨率下长边 800 应得 800×600，实际 {0}×{1}", fullWidth, fullHeight));
+            }
+            else if (halfWidth != 400 || halfHeight != 300)
+            {
+                failures++;
+                log.AppendLine(string.Format("  FAIL 半缩放预览下应得 400×300（绝对参数必须乘 Scale），实际 {0}×{1}", halfWidth, halfHeight));
+            }
+            else
+            {
+                log.AppendLine(string.Format(
+                    "  OK   绝对像素参数随预览缩放：全分辨率 {0}×{1} → 半缩放 {2}×{3}",
+                    fullWidth, fullHeight, halfWidth, halfHeight));
+            }
+
+            BatchResizeStep percent = new BatchResizeStep { Mode = BatchResizeMode.Percent, Value = 50 };
+
+            int percentFullWidth;
+            int percentFullHeight;
+            int percentHalfWidth;
+            int percentHalfHeight;
+            percent.ReadTargetSize(1600, 1200, BatchContext.FullResolution, out percentFullWidth, out percentFullHeight);
+            percent.ReadTargetSize(1600, 1200, half, out percentHalfWidth, out percentHalfHeight);
+
+            checks++;
+            if (percentFullWidth != percentHalfWidth || percentFullHeight != percentHalfHeight)
+            {
+                failures++;
+                log.AppendLine(string.Format(
+                    "  FAIL 百分比是相对量，不应受预览缩放影响（{0}×{1} vs {2}×{3}）",
+                    percentFullWidth, percentFullHeight, percentHalfWidth, percentHalfHeight));
+            }
+            else
+            {
+                log.AppendLine(string.Format("  OK   百分比参数不受预览缩放影响（恒为 {0}×{1}）", percentFullWidth, percentFullHeight));
+            }
+
+            // 水印的相对字号同理：宽度占比与画布尺寸无关
+            BatchWatermarkStep watermark = new BatchWatermarkStep
+            {
+                Text = "水印",
+                SizeMode = WatermarkSizeMode.RelativeToWidth,
+                FontSize = 10.0,
+                Anchor = TextAnchor.Center,
+                Opacity = 255
+            };
+
+            PixelBuffer wide = CreateSolidBuffer(1200, 300, 20, 20, 20);
+            PixelBuffer narrow = CreateSolidBuffer(400, 100, 20, 20, 20);
+
+            int wideTextWidth;
+            int wideTextHeight;
+            int narrowTextWidth;
+            int narrowTextHeight;
+            MeasureBrightBounds(
+                BatchPipeliner.Run(wide, new List<IBatchStep> { watermark }, BatchContext.FullResolution, System.Threading.CancellationToken.None),
+                128, out wideTextWidth, out wideTextHeight);
+            MeasureBrightBounds(
+                BatchPipeliner.Run(narrow, new List<IBatchStep> { watermark }, BatchContext.FullResolution, System.Threading.CancellationToken.None),
+                128, out narrowTextWidth, out narrowTextHeight);
+
+            checks++;
+            if (wideTextWidth <= 0 || narrowTextWidth <= 0)
+            {
+                failures++;
+                log.AppendLine(string.Format("  FAIL 相对字号水印应能画出可见文字，实测宽 {0} / {1}", wideTextWidth, narrowTextWidth));
+            }
+            else
+            {
+                double wideRatio = wideTextWidth / 1200.0;
+                double narrowRatio = narrowTextWidth / 400.0;
+
+                if (Math.Abs(wideRatio - narrowRatio) > 0.02)
+                {
+                    failures++;
+                    log.AppendLine(string.Format(
+                        "  FAIL 相对字号水印的宽度占比应基本一致，实测 {0:0.###} vs {1:0.###}",
+                        wideRatio, narrowRatio));
+                }
+                else
+                {
+                    log.AppendLine(string.Format(
+                        "  OK   相对字号水印与大图尺寸无关：1200px 图上占 {0:0.#}%，400px 图上占 {1:0.#}%",
+                        wideRatio * 100.0, narrowRatio * 100.0));
+                }
+            }
+        }
+
+        /// <summary>
+        /// C. 输出命名。
+        ///
+        /// 三条规则里最容易出错的是"同一次运行内的冲突"：来自不同文件夹的同名文件撞名时，
+        /// 磁盘上还没有第二个文件，单靠 File.Exists 根本查不出来 —— 会静默互相覆盖。
+        /// 这条断言就是为它写的。
+        /// </summary>
+        private static void CheckBatchOutputNaming(string tempRoot, ref int checks, ref int failures, StringBuilder log)
+        {
+            string root = Path.Combine(tempRoot, "batch-naming");
+            Directory.CreateDirectory(root);
+
+            string source = Path.Combine(root, "photo.png");
+            File.WriteAllText(source, "stub");
+            File.WriteAllText(Path.Combine(root, "photo_批量.png"), "already here");
+
+            BatchOutputNaming naming = new BatchOutputNaming(root, "_批量", null);
+            HashSet<string> reserved = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+            string first = naming.NextOutputPath(source, reserved);
+
+            checks++;
+            if (!string.Equals(Path.GetFileName(first), "photo_批量_2.png", StringComparison.OrdinalIgnoreCase))
+            {
+                failures++;
+                log.AppendLine("  FAIL 磁盘已有 photo_批量.png，应让到 photo_批量_2.png，实际 " + Path.GetFileName(first));
+            }
+            else
+            {
+                log.AppendLine("  OK   磁盘同名自动加序号：" + Path.GetFileName(first));
+            }
+
+            reserved.Add(first);
+
+            // 同一次运行内、磁盘上尚无该文件 —— 只有 reserved 集合能拦住它
+            string second = naming.NextOutputPath(source, reserved);
+
+            checks++;
+            if (!string.Equals(Path.GetFileName(second), "photo_批量_3.png", StringComparison.OrdinalIgnoreCase))
+            {
+                failures++;
+                log.AppendLine(string.Format(
+                    "  FAIL 同一次运行内的重名未被拦住（磁盘上没有 photo_批量_2.png，只能靠已分配集合判断），实际 {0}",
+                    Path.GetFileName(second)));
+            }
+            else
+            {
+                log.AppendLine("  OK   同一次运行内的重名也会让号（不会静默互相覆盖）：" + Path.GetFileName(second));
+            }
+
+            checks++;
+            if (string.Equals(first, source, StringComparison.OrdinalIgnoreCase))
+            {
+                failures++;
+                log.AppendLine("  FAIL 输出路径与源文件相同，会覆盖原图");
+            }
+            else
+            {
+                log.AppendLine("  OK   输出路径绝不等于源文件");
+            }
+
+            // 后缀清空时目标名会与源文件重合，必须被识别出来
+            BatchOutputNaming noSuffix = new BatchOutputNaming(root, string.Empty, null);
+            string fallback = noSuffix.NextOutputPath(source, new HashSet<string>(StringComparer.OrdinalIgnoreCase));
+
+            checks++;
+            if (!string.Equals(Path.GetFileName(fallback), "photo_2.png", StringComparison.OrdinalIgnoreCase))
+            {
+                failures++;
+                log.AppendLine("  FAIL 后缀为空时应避开源文件名，实际 " + Path.GetFileName(fallback));
+            }
+            else
+            {
+                log.AppendLine("  OK   后缀为空也不会覆盖源文件（" + Path.GetFileName(fallback) + "）");
+            }
+
+            // 用户手输的后缀可能含非法字符
+            checks++;
+            string dirty = BatchOutputNaming.SanitizeFileNamePart("a/b:c*d?e");
+            if (dirty.IndexOf('/') >= 0 || dirty.IndexOf(':') >= 0 || dirty.IndexOf('*') >= 0 || dirty.IndexOf('?') >= 0)
+            {
+                failures++;
+                log.AppendLine("  FAIL 后缀里的非法字符未被过滤：" + dirty);
+            }
+            else
+            {
+                log.AppendLine("  OK   后缀非法字符被替换为下划线：" + dirty);
+            }
+
+            // 强制扩展名（统一转格式时用）
+            checks++;
+            BatchOutputNaming forced = new BatchOutputNaming(root, "_x", "jpg");
+            string forcedPath = forced.PreviewPath(Path.Combine(root, "a.png"));
+            if (!forcedPath.EndsWith(".jpg", StringComparison.OrdinalIgnoreCase))
+            {
+                failures++;
+                log.AppendLine("  FAIL 强制扩展名未生效：" + Path.GetFileName(forcedPath));
+            }
+            else
+            {
+                log.AppendLine("  OK   强制扩展名统一为 .jpg（jpg → .jpg 规范化）：" + Path.GetFileName(forcedPath));
+            }
+        }
+
+        /// <summary>
+        /// D. 整条含文字水印的流水线在**非 UI 线程**上跑通。
+        ///
+        /// TextOverlayFilter 原先写着"必须在 UI 线程构造 RenderTargetBitmap"，
+        /// 但自检一直在普通线程调它且从未失败 —— 那个约束不成立。
+        /// 这条断言把"不成立"钉死：批量每张图都要切回 UI 线程排队的话，界面会一顿一顿。
+        /// </summary>
+        private static void CheckBatchOffUiThread(ref int checks, ref int failures, StringBuilder log)
+        {
+            PixelBuffer source = CreateSolidBuffer(240, 160, 20, 20, 20);
+
+            List<IBatchStep> steps = new List<IBatchStep>
+            {
+                new BatchResizeStep { Mode = BatchResizeMode.Percent, Value = 100, OnlyShrink = false },
+                new BatchWatermarkStep
+                {
+                    Text = "线程",
+                    SizeMode = WatermarkSizeMode.RelativeToWidth,
+                    FontSize = 12.0,
+                    Anchor = TextAnchor.BottomRight,
+                    Opacity = 200
+                }
+            };
+
+            int callerThreadId = System.Threading.Thread.CurrentThread.ManagedThreadId;
+            int workerThreadId = 0;
+            PixelBuffer result = null;
+            Exception workerError = null;
+
+            Task.Run(() =>
+            {
+                try
+                {
+                    workerThreadId = System.Threading.Thread.CurrentThread.ManagedThreadId;
+                    result = BatchPipeliner.Run(source, steps, BatchContext.FullResolution, System.Threading.CancellationToken.None);
+                }
+                catch (Exception ex)
+                {
+                    workerError = ex;
+                }
+            }).GetAwaiter().GetResult();
+
+            checks++;
+            if (workerError != null)
+            {
+                failures++;
+                log.AppendLine("  FAIL 含文字水印的流水线在线程池线程上失败了：" + workerError.GetType().Name + " " + workerError.Message);
+            }
+            else if (result == null)
+            {
+                failures++;
+                log.AppendLine("  FAIL 后台线程上的流水线没有返回结果");
+            }
+            else if (workerThreadId == callerThreadId)
+            {
+                failures++;
+                log.AppendLine("  FAIL 流水线并没有真的跑在别的线程上（线程号相同），这条断言失去意义");
+            }
+            else
+            {
+                log.AppendLine(string.Format(
+                    "  OK   含文字水印的整条流水线在后台线程跑通（线程 {0} → {1}，输出 {2}×{3}）",
+                    callerThreadId, workerThreadId, result.Width, result.Height));
+            }
+
+            checks++;
+            if (result == null)
+            {
+                failures++;
+                log.AppendLine("  FAIL 无法校验水印是否真的画上了（没有输出）");
+            }
+            else
+            {
+                int textWidth;
+                int textHeight;
+                MeasureBrightBounds(result, 128, out textWidth, out textHeight);
+
+                if (textWidth <= 0 || textHeight <= 0)
+                {
+                    failures++;
+                    log.AppendLine("  FAIL 后台线程产出的结果里看不到水印");
+                }
+                else
+                {
+                    log.AppendLine(string.Format("  OK   后台线程产出的水印可见（亮区 {0}×{1} px）", textWidth, textHeight));
+                }
+            }
+        }
+
+        /// <summary>
+        /// E. 端到端。
+        ///
+        /// 两个关键断言：
+        ///   1. 一个坏文件不能让后面的文件陪葬（逐张独立）；
+        ///   2. **预览推算的输出尺寸 == 实际写出的文件尺寸** —— 这是"面板缩略图不骗人"的最终校验，
+        ///      也是 BatchContext.Scale 存在的全部理由。允许 1% 误差：
+        ///      预览是基于"整数因子降采样"的小图算的，取整链条必然引入 1~2 px 偏差。
+        /// </summary>
+        private static void CheckBatchEndToEnd(
+            IImageService imageService,
+            string tempRoot,
+            ref int checks,
+            ref int failures,
+            StringBuilder log)
+        {
+            string root = Path.Combine(tempRoot, "batch-e2e");
+            string sourceDirectory = Path.Combine(root, "src");
+            string outputDirectory = Path.Combine(root, "out");
+            Directory.CreateDirectory(sourceDirectory);
+
+            string bigPath = Path.Combine(sourceDirectory, "big.png");
+            string smallPath = Path.Combine(sourceDirectory, "small.png");
+            string brokenPath = Path.Combine(sourceDirectory, "broken.png");
+
+            // 1600×1200 会在预览里被降采样（上限 720），因此能真正走到 Scale 路径
+            CreateTestImage(bigPath, 1600, 1200, 96.0, ImageFileFormat.Png, log);
+            CreateTestImage(smallPath, 400, 300, 96.0, ImageFileFormat.Png, log);
+            File.WriteAllText(brokenPath, "this is not an image");
+
+            MainViewModel viewModel = new MainViewModel(
+                imageService,
+                new NullDialogService(),
+                new ImmediateDispatcherService());
+
+            viewModel.BatchOutputDirectory = outputDirectory;
+            viewModel.BatchFileNameSuffix = "_批量";
+            viewModel.BatchOutputFormat = new BatchOutputFormatOption(ImageFileFormat.Png, "PNG");
+
+            viewModel.BatchSteps.Add(new BatchStepViewModel(
+                new BatchResizeStep
+                {
+                    Mode = BatchResizeMode.LongEdge,
+                    Value = 800,
+                    OnlyShrink = true,
+                    Kernel = ResampleKernel.Bicubic
+                }, 1));
+
+            viewModel.BatchSteps.Add(new BatchStepViewModel(
+                new BatchWatermarkStep
+                {
+                    Text = "批量测试",
+                    SizeMode = WatermarkSizeMode.RelativeToWidth,
+                    FontSize = 6.0,
+                    Anchor = TextAnchor.BottomRight,
+                    Opacity = 200
+                }, 2));
+
+            bool addedBig = viewModel.AddBatchQueueItem(bigPath);
+            bool addedSmall = viewModel.AddBatchQueueItem(smallPath);
+            bool addedBroken = viewModel.AddBatchQueueItem(brokenPath);
+            bool duplicate = viewModel.AddBatchQueueItem(bigPath);
+
+            checks++;
+            if (!addedBig || !addedSmall || !addedBroken || duplicate || viewModel.BatchQueue.Count != 3)
+            {
+                failures++;
+                log.AppendLine(string.Format(
+                    "  FAIL 队列入队与去重异常：加了 {0}/{1}/{2}，重复项被接受={3}，队列 {4} 项",
+                    addedBig, addedSmall, addedBroken, duplicate, viewModel.BatchQueue.Count));
+            }
+            else
+            {
+                log.AppendLine("  OK   队列入队正常，重复路径被忽略（队列 3 项）");
+            }
+
+            viewModel.SelectedBatchItem = viewModel.BatchQueue[0];
+
+            // 执行（Confirm 由 NullDialogService 返回 Yes）
+            viewModel.RunBatchAsync().GetAwaiter().GetResult();
+
+            checks++;
+            if (viewModel.IsBatchRunning)
+            {
+                failures++;
+                log.AppendLine("  FAIL 批量执行结束后 IsBatchRunning 没有复位");
+            }
+            else
+            {
+                log.AppendLine("  OK   批量执行结束后状态已复位");
+            }
+
+            checks++;
+            if (viewModel.BatchQueue[0].IsFailed || viewModel.BatchQueue[1].IsFailed || !viewModel.BatchQueue[2].IsFailed)
+            {
+                failures++;
+                log.AppendLine(string.Format(
+                    "  FAIL 逐张状态不符：期望「前两张成功、坏文件失败」，实际 {0} / {1} / {2}",
+                    viewModel.BatchQueue[0].Status, viewModel.BatchQueue[1].Status, viewModel.BatchQueue[2].Status));
+            }
+            else
+            {
+                log.AppendLine(string.Format("  OK   坏文件不影响其它文件：坏文件状态「{0}」", viewModel.BatchQueue[2].Status));
+            }
+
+            string bigOutput = Path.Combine(outputDirectory, "big_批量.png");
+            string smallOutput = Path.Combine(outputDirectory, "small_批量.png");
+
+            checks++;
+            if (!File.Exists(bigOutput) || !File.Exists(smallOutput))
+            {
+                failures++;
+                log.AppendLine(string.Format(
+                    "  FAIL 输出文件缺失：big={0} small={1}", File.Exists(bigOutput), File.Exists(smallOutput)));
+            }
+            else
+            {
+                ImageLoadResult bigResult = imageService.LoadAsync(bigOutput).GetAwaiter().GetResult();
+                ImageLoadResult smallResult = imageService.LoadAsync(smallOutput).GetAwaiter().GetResult();
+
+                checks++;
+                if (bigResult.PixelWidth != 800 || bigResult.PixelHeight != 600)
+                {
+                    failures++;
+                    log.AppendLine(string.Format(
+                        "  FAIL 1600×1200 长边缩到 800 应得 800×600，实际 {0}×{1}",
+                        bigResult.PixelWidth, bigResult.PixelHeight));
+                }
+                else
+                {
+                    log.AppendLine("  OK   长边约束生效：1600×1200 → 800×600");
+                }
+
+                checks++;
+                if (smallResult.PixelWidth != 400 || smallResult.PixelHeight != 300)
+                {
+                    failures++;
+                    log.AppendLine(string.Format(
+                        "  FAIL 400×300 小于目标长边，「只缩不放」应保持原尺寸，实际 {0}×{1}",
+                        smallResult.PixelWidth, smallResult.PixelHeight));
+                }
+                else
+                {
+                    log.AppendLine("  OK   「只缩不放」生效：400×300 不被放大");
+                }
+
+                // ---- 预览推算 vs 实际输出 ----
+                viewModel.SelectedBatchItem = viewModel.BatchQueue[0];
+                viewModel.RunBatchPreviewAsync().GetAwaiter().GetResult();
+
+                checks++;
+                if (viewModel.BatchPreviewImage == null)
+                {
+                    failures++;
+                    log.AppendLine("  FAIL 预览没有产出图像：" + viewModel.BatchPreviewText);
+                }
+                else
+                {
+                    log.AppendLine(string.Format(
+                        "  OK   预览已生成（{0}×{1} px）",
+                        viewModel.BatchPreviewImage.PixelWidth,
+                        viewModel.BatchPreviewImage.PixelHeight));
+                }
+
+                checks++;
+                int estimateWidth = viewModel.BatchPreviewOutputWidth;
+                int estimateHeight = viewModel.BatchPreviewOutputHeight;
+                double toleranceWidth = Math.Max(2.0, bigResult.PixelWidth * 0.01);
+                double toleranceHeight = Math.Max(2.0, bigResult.PixelHeight * 0.01);
+
+                if (Math.Abs(estimateWidth - bigResult.PixelWidth) > toleranceWidth
+                    || Math.Abs(estimateHeight - bigResult.PixelHeight) > toleranceHeight)
+                {
+                    failures++;
+                    log.AppendLine(string.Format(
+                        "  FAIL 预览推算的输出尺寸与实际不符（预览会说谎）：预览 {0}×{1}，实际 {2}×{3}",
+                        estimateWidth, estimateHeight, bigResult.PixelWidth, bigResult.PixelHeight));
+                }
+                else
+                {
+                    log.AppendLine(string.Format(
+                        "  OK   预览推算的输出尺寸与实际一致（预览 {0}×{1} vs 实际 {2}×{3}，容差 1%）",
+                        estimateWidth, estimateHeight, bigResult.PixelWidth, bigResult.PixelHeight));
+                }
+            }
+
+            // 再跑一次：同名的旧输出还在，必须让号而不是覆盖
+            viewModel.RunBatchAsync().GetAwaiter().GetResult();
+
+            checks++;
+            if (!File.Exists(Path.Combine(outputDirectory, "big_批量_2.png")))
+            {
+                failures++;
+                log.AppendLine("  FAIL 第二次运行没有让号出新文件（应生成 big_批量_2.png）");
+            }
+            else if (File.Exists(bigOutput) && File.Exists(smallOutput))
+            {
+                log.AppendLine("  OK   第二次运行自动让号，原有输出未被覆盖");
+            }
+            else
+            {
+                failures++;
+                log.AppendLine("  FAIL 第二次运行把第一次的输出弄丢了");
+            }
+        }
+
+        /// <summary>
+        /// 量出"亮像素"的包围盒尺寸（用于度量白字水印的大小）。
+        /// 亮度阈值取通道最大值，避免依赖具体的灰度公式。
+        /// </summary>
+        private static void MeasureBrightBounds(PixelBuffer buffer, int threshold, out int width, out int height)
+        {
+            width = 0;
+            height = 0;
+
+            if (buffer == null)
+            {
+                return;
+            }
+
+            byte[] pixels = buffer.GetPixels();
+            int minX = int.MaxValue;
+            int minY = int.MaxValue;
+            int maxX = -1;
+            int maxY = -1;
+
+            for (int y = 0; y < buffer.Height; y++)
+            {
+                int rowOffset = y * buffer.Stride;
+
+                for (int x = 0; x < buffer.Width; x++)
+                {
+                    int index = rowOffset + x * 4;
+                    int luminosity = pixels[index];
+
+                    if (pixels[index + 1] > luminosity)
+                    {
+                        luminosity = pixels[index + 1];
+                    }
+
+                    if (pixels[index + 2] > luminosity)
+                    {
+                        luminosity = pixels[index + 2];
+                    }
+
+                    if (luminosity < threshold)
+                    {
+                        continue;
+                    }
+
+                    if (x < minX)
+                    {
+                        minX = x;
+                    }
+
+                    if (x > maxX)
+                    {
+                        maxX = x;
+                    }
+
+                    if (y < minY)
+                    {
+                        minY = y;
+                    }
+
+                    if (y > maxY)
+                    {
+                        maxY = y;
+                    }
+                }
+            }
+
+            if (maxX < 0)
+            {
+                return;
+            }
+
+            width = maxX - minX + 1;
+            height = maxY - minY + 1;
+        }
+
+        #endregion
 
         /// <summary>点 (x, y) 是否落在以 (x1,y1)-(x2,y2) 为轴的胶囊带内（用于校验涂抹范围）。</summary>
         private static bool IsNearStroke(int x, int y, int x1, int y1, int x2, int y2, int radius)

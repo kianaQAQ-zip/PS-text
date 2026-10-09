@@ -532,6 +532,73 @@ namespace PSText.Views
 
         #endregion
 
+        #region 批量步骤的颜色预设（同样只转发）
+
+        private void OnBatchBorderColorWhite(object sender, RoutedEventArgs e)
+        {
+            SetBatchBorderColor(Colors.White);
+        }
+
+        private void OnBatchBorderColorBlack(object sender, RoutedEventArgs e)
+        {
+            SetBatchBorderColor(Colors.Black);
+        }
+
+        private void OnBatchBorderColorGray(object sender, RoutedEventArgs e)
+        {
+            SetBatchBorderColor(Color.FromRgb(0xD9, 0xD9, 0xD9));
+        }
+
+        private void OnBatchBorderColorCream(object sender, RoutedEventArgs e)
+        {
+            SetBatchBorderColor(Color.FromRgb(0xF5, 0xEF, 0xE0));
+        }
+
+        private void SetBatchBorderColor(Color color)
+        {
+            MainViewModel viewModel = ViewModel;
+            if (viewModel != null)
+            {
+                viewModel.SetBatchBorderColor(color);
+            }
+        }
+
+        private void OnBatchWatermarkColorWhite(object sender, RoutedEventArgs e)
+        {
+            SetBatchWatermarkColor(Colors.White);
+        }
+
+        private void OnBatchWatermarkColorBlack(object sender, RoutedEventArgs e)
+        {
+            SetBatchWatermarkColor(Colors.Black);
+        }
+
+        private void OnBatchWatermarkColorGray(object sender, RoutedEventArgs e)
+        {
+            SetBatchWatermarkColor(Color.FromRgb(0xC0, 0xC0, 0xC0));
+        }
+
+        private void OnBatchWatermarkColorYellow(object sender, RoutedEventArgs e)
+        {
+            SetBatchWatermarkColor(Color.FromRgb(0xFF, 0xD5, 0x2E));
+        }
+
+        private void OnBatchWatermarkColorRed(object sender, RoutedEventArgs e)
+        {
+            SetBatchWatermarkColor(Color.FromRgb(0xE0, 0x3A, 0x3A));
+        }
+
+        private void SetBatchWatermarkColor(Color color)
+        {
+            MainViewModel viewModel = ViewModel;
+            if (viewModel != null)
+            {
+                viewModel.SetBatchWatermarkColor(color);
+            }
+        }
+
+        #endregion
+
         #region 裁剪框交互
 
         /// <summary>

@@ -75,8 +75,12 @@ namespace PSText.Services.Filters
     /// 先把源像素包成 BitmapSource 作为背景绘制，再在 DPI 感知的画布上绘制文字，
     /// 最后把渲染结果读回像素缓冲，交给统一的提交 / 撤销流程处理。
     ///
-    /// 注意：RenderTargetBitmap 必须在 UI 线程创建（WPF 的 DispatcherObject 约定），
-    /// 因此本方法内部通过调用方提供的调度器切回 UI 线程，保证在 Win7 上行为稳定。
+    /// 线程要求（原先写成"必须在 UI 线程"，实测是**多余的约束**，已修正）：
+    ///   WPF 对 DrawingVisual / FormattedText / RenderTargetBitmap 的真实要求是
+    ///   "创建与使用必须在同一个线程"，并没有规定必须是 UI 线程。
+    ///   证据有两条：自检一直在普通线程上直接调用 <see cref="Apply"/> 且从未失败；
+    ///   批量流水线整条跑在线程池线程上也能正常出图（见自检 [32]）。
+    ///   这条修正不是纸面清理 —— 若不解除，批量每张图都要切回 UI 线程排队，界面会一顿一顿。
     /// </summary>
     public sealed class TextOverlayFilter
     {
@@ -167,7 +171,12 @@ namespace PSText.Services.Filters
             return PixelBuffer.FromBitmap(rendered);
         }
 
-        /// <summary>异步包装（内部依然要求 UI 线程，由调用方的调度器保证）。</summary>
+        /// <summary>
+        /// 异步包装：把渲染放到线程池执行，避免大图在 UI 线程上同步渲染造成卡顿。
+        ///
+        /// 早先这里是直接同步调用后返回已完成任务（理由是"RenderTargetBitmap 依赖 UI 线程"），
+        /// 那个理由不成立（详见类型注释），代价却是单张加字时 UI 会僵住一下。
+        /// </summary>
         public Task<PixelBuffer> ApplyAsync(
             IReadOnlyPixelBuffer source,
             TextOverlayOptions options,
@@ -180,9 +189,7 @@ namespace PSText.Services.Filters
                 throw new ArgumentNullException("source");
             }
 
-            // RenderTargetBitmap 依赖 UI 线程，这里不做 Task.Run，直接调用并返回已完成任务。
-            cancellationToken.ThrowIfCancellationRequested();
-            return Task.FromResult(Apply(source, options, dpiX, dpiY));
+            return Task.Run(() => Apply(source, options, dpiX, dpiY), cancellationToken);
         }
 
         private static Typeface BuildTypeface(TextOverlayOptions options)

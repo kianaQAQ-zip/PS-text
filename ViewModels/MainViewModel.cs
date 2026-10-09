@@ -26,7 +26,9 @@ namespace PSText.ViewModels
     ///
     /// 设计约定：
     ///   - 不引用任何 UI 控件类型，只通过 IDialogService / IDispatcherService 与界面交互；
-    ///   - 所有异步操作均为 Task，不使用 async void（唯一例外见 Adjustments 文件中的说明）；
+    ///   - 异步操作以 Task 为主；async void 仅限"由 UI 事件 / 计时器触发且内部全包 try/catch"
+    ///     的入口（见 Adjustments 的 RunRenderAsync）；批量的两个长流程刻意返回 Task，
+    ///     以便自检能等到它结束（见 Batch 文件说明）；
     ///   - 位图用“不可变快照”方式替换（ImageDocument），便于撤销 / 重做。
     /// </summary>
     public sealed partial class MainViewModel : ObservableObject
@@ -186,6 +188,9 @@ namespace PSText.ViewModels
 
             // 打印与批量打印命令（见 MainViewModel.Print.cs）
             InitializePrintCommands();
+
+            // 批量流水线命令（见 MainViewModel.Batch.cs）
+            InitializeBatchCommands();
 
             // 设置 / 主题 / 最近文件命令（见 MainViewModel.Settings.cs）
             InitializeSettingsCommands();

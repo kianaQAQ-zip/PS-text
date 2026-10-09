@@ -197,6 +197,10 @@
     <Compile Include="Services\Filters\AnnotationRenderer.cs" />
     <Compile Include="Services\Filters\BorderFilters.cs" />
     <Compile Include="Services\Filters\TextOverlayFilter.cs" />
+    <Compile Include="Services\Batch\BatchStep.cs" />
+    <Compile Include="Services\Batch\BatchSteps.cs" />
+    <Compile Include="Services\Batch\BatchPipeliner.cs" />
+    <Compile Include="Services\Batch\BatchOutputNaming.cs" />
   </ItemGroup>
 
   <!-- ============ ViewModel ============ -->
@@ -210,6 +214,7 @@
     <Compile Include="ViewModels\MainViewModel.Stamp.cs" />
     <Compile Include="ViewModels\MainViewModel.Annotation.cs" />
     <Compile Include="ViewModels\MainViewModel.Print.cs" />
+    <Compile Include="ViewModels\MainViewModel.Batch.cs" />
     <Compile Include="ViewModels\MainViewModel.Settings.cs" />
     <Compile Include="ViewModels\PrintPreviewViewModel.cs" />
     <Compile Include="ViewModels\ZoomMode.cs" />
