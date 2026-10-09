@@ -25,7 +25,9 @@
 - WPF + .NET Framework 4.8，`AnyCPU + Prefer32Bit=true`（32 位运行）。
 - **零第三方 NuGet**——引入任何依赖前必须先向用户确认。
 - 构建产物在 `build/bin`（`Directory.Build.props` 定制），`.csproj` 为传统显式包含（**新文件必须手工加 `<Compile Include>`**）。
-- 自检在 `SelfTest.cs`（约 7,700 行 / **241 断言**），`PSText.exe --selftest` 运行。
+- 自检在 `SelfTest.cs`（约 8,800 行 / **258 断言**），`PSText.exe --selftest` 运行。
+  ⚠️ 其中**文件关联的写入流程约 18 项在本机是 Skip 的**（本机工具层拦下可执行文件写注册表，
+  已核实非代码问题）。自检先探测 HKCU 可写性，不可写就明确 Skip，避免恒红。
 - MVVM：VM 只依赖 `IImageService / IDialogService / IDispatcherService / IPrintService`，**不得引用 WPF 控件类型**。
 - 滤镜一律写成纯函数：`BitmapSource → WriteableBitmap`，并保持"串行=并行"逐像素一致。
 - 项目保持**零编译警告**：fire-and-forget 的 `Task` 要存进字段（否则 CS4014）。
@@ -43,8 +45,9 @@
 - 日志落在 `build/selftest.log`、`build/bin/Release/selftest.log`、`$TEMP/pstext-selftest.log` 三处。
 - PowerShell 的 `[Reflection.Assembly]::LoadFrom` 也被拦截（等同 Add-Type），
   想验证某个静态方法请**改成加一条自检**，别走反射。
-- 已沉淀脚本 `build/build.py`（`build/` 被 gitignore，换机器需重建）：
-  `"<managed-python>" build/build.py Release`。
+- 已沉淀脚本（都在 `tools/`，**进仓库**；`build/` 被 gitignore，只放产物）：
+  `"<managed-python>" tools/build.py Release`、`tools/package.py`（免安装包）、
+  `tools/verify-launcher.ps1`（启动器分支验证，需 `Set-ExecutionPolicy -Scope Process Bypass`）。
 
 ## 版本控制与远端（已配置 · 2026-10-07）
 - 远端：`git@github.com:kianaQAQ-zip/PS-text.git`，分支 `main`，SSH 推送，追踪已建立。
@@ -72,6 +75,27 @@
   只要求"创建与使用在同一线程"。已验证：整条含文字水印的批量流水线在线程池线程跑通（自检 [32]）。
 - **自检里不能轮询"批量跑完没有"**：批量入口刻意返回 `Task`（`internal Task RunBatchAsync()`），
   自检 `GetAwaiter().GetResult()` 直接等它，不靠 sleep 猜。
+
+## 交付与系统集成（M4 · 2026-10-09 完成）
+- **产品版本号只写在 `Properties/AssemblyInfo.cs`**（`AssemblyInformationalVersion` = 单一来源，打包脚本读它）。
+  传统（非 SDK）csproj **不消费** `<AssemblyTitle>` / `<AssemblyVersion>` —— 写了不报错，
+  但 exe 版本**永远 0.0.0.0**（M4 之前一直如此）。自动生成程序集信息只对 SDK 风格工程生效。
+- **4.8 判定必须读注册表** `HKLM\SOFTWARE\Microsoft\NET Framework Setup\NDP\v4\Full` 的 `Release`：
+  `Environment.Version` 在任何 .NET 4.x 上都报 **4.0.30319**（它是 CLR 版本），拿它判断必然错。
+  32 位进程读 `HKLM\SOFTWARE` 会被重定向到 `Wow6432Node` → **两个注册表视图都读，取较大的 Release**。
+- **启动器 bat 不能用 `reg query` 的 Release 比大小**：`reg` 打印的是**十六进制**（`0x82309`）。
+  改用 `reg query ... /v Version | findstr /c:"4.8."`（一条命令、不涉进制、与系统语言无关）。
+- **检测要做两层**（因为没有 App.config，exe 声明 CLR v4.0）：只装 4.5/4.6.2 的 Win7 上
+  **exe 能起来**却在用 4.8 API 时半路崩。程序内启动检测管"起来了但版本不够"；bat 管"根本起不来 + 离线装"。
+- **文件关联只登记"打开方式"、不抢默认**（Vista 起程序无权静默设默认）。写 HKCU，不需要管理员：
+  `Classes\PSText.Image`（ProgID/DefaultIcon/shell\open\command）+ `Classes\Applications\PS-text.exe`
+  + 各扩展名 `OpenWithProgids` + `RegisteredApplications` 与 `PS-text\Capabilities`（Win7「设置默认程序」只认这套）。
+  收尾必须调 `SHChangeNotify(SHCNE_ASSOCCHANGED)`，否则资源管理器要等下次登录才认。
+- **关联服务的注册表根键是构造参数**，自检写 `Software\PSText-SelfTest-<guid>`，**绝不碰用户真实关联**。
+- 免安装包：`tools/package.py` → `build/dist/PS-text-1.0.0-win7-portable/` + zip（**0.24 MB**，
+  只有 exe + 启动器 + 说明，因为零 NuGet 且无 App.config → 不生成 `.exe.config`）。
+- 无界面开关：`--register` / `--unregister` / `--assoc-status` / `--runtime`（`Services/CommandLineOptions.cs`）。
+  WinExe 无控制台 → `Services/ConsoleBridge.cs` 用 `AttachConsole(ATTACH_PARENT_PROCESS)`，失败退回弹窗。
 
 ## 撤销架构（三种模型，按编辑类型选）
 1. **整幅压缩快照**（`EditState` + `BufferEditCommand`）：滤镜 / 裁剪 / 缩放 / 旋转等"一次性、改尺寸"的编辑。

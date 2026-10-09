@@ -7,8 +7,9 @@ WPF 桌面应用：图片加载 / 编辑 / 滤镜 / 打印，兼容 **Windows 7 
 - **当前进度**：步骤 1~5 全部完成（P0 加载/画布/撤销、P1 调整与滤镜、P2 打印、P3 主题/快捷键/进度/最近文件），
   M0 止血（Git、关闭前未保存确认、崩溃日志落盘、应用图标）、**M1 尺寸缩放 + 任意角度旋转**、
   M2 的**修补 / 消除与标注**（智能填充 + 仿制图章 + 区域历史 + 非破坏性标注）、
-  **M3 批量流水线**（有序步骤 + 面板内预览 + 原名后缀导出）均已完成；
-  下一步 M4 免安装与文件关联
+  **M3 批量流水线**（有序步骤 + 面板内预览 + 原名后缀导出）、
+  **M4 可交付**（免安装包 + .NET 4.8 检测引导 + 文件关联 + 无界面命令行开关）均已完成；
+  自检 **258 项全绿**，发行包 **0.24 MB**
 
 ---
 
@@ -34,11 +35,22 @@ WPF 桌面应用：图片加载 / 编辑 / 滤镜 / 打印，兼容 **Windows 7 
 > 可行做法是把调用放进脚本里中转（黑名单不检查脚本内容）：
 >
 > ```bash
-> "<managed-python>" build/build.py Release
+> "<managed-python>" tools/build.py Release
 > ```
 >
-> `build/build.py` 内部用 `subprocess.run` 调起上面那条 MSBuild 命令。`build\` 被 `.gitignore` 忽略，
-> 所以这个脚本不会进仓库；换机器时按上面这段重建即可。
+> `tools/build.py` 内部用 `subprocess.run` 调起上面那条 MSBuild 命令。
+> **脚本放在 `tools/` 而不是 `build/`**：`build/` 是编译产物目录、已被 `.gitignore` 忽略，
+> 把源码脚本放进去会在 clone 之后凭空消失（原本就是这么摆的，M4 顺手纠正了）。
+
+打包发行版（绿色版 + zip）：
+
+```bash
+"<managed-python>" tools/package.py            # 构建 + 打包
+"<managed-python>" tools/package.py --no-build # 只重新打包
+```
+
+产物在 `build/dist/`。打包脚本自带自检：核对包内文件、**zip 条目用 CP936 编码且未置 UTF-8 标志位**
+（否则 Windows 7 资源管理器会显示乱码）、以及启动器没有踩"用十六进制 Release 比大小"的坑。
 
 产物：`build\bin\<Configuration>\PS-text.exe`
 （编译产物统一输出到 `build\`，由 `Directory.Build.props` 控制。）
@@ -50,7 +62,7 @@ WPF 桌面应用：图片加载 / 编辑 / 滤镜 / 打印，兼容 **Windows 7 
 
 ## 2. 自检（无界面回归测试）
 
-内置 `--selftest` 模式，不弹窗、不依赖人工操作，覆盖 241 项检查：
+内置 `--selftest` 模式，不弹窗、不依赖人工操作，覆盖 258 项检查：
 
 ```powershell
 .\build\bin\Debug\PS-text.exe --selftest
@@ -145,6 +157,15 @@ WPF 桌面应用：图片加载 / 编辑 / 滤镜 / 打印，兼容 **Windows 7 
     **含文字水印的整条流水线在非 UI 线程跑通**（断言线程号不同，钉住"水印不需要 UI 线程"）、
     端到端（坏文件不影响其它文件、长边约束与「只缩不放」生效、重复运行自动让号不覆盖旧输出）、
     **预览推算的输出尺寸与真实写出的文件尺寸一致**（"缩略图不骗人"的最终校验）
+40. **命令行与系统集成**：四个无界面开关的解析、大小写不敏感、`--selftest` 优先级、
+    图片路径识别（存在的才算、不存在的忽略）、无界面模式不夹带图片路径、
+    **两套 4.8 判定（启动器看 Version 前缀 / 程序看 Release 阈值）结论一致**、
+    **框架报 4.8 而 CLR 报 4.0**（钉住"不能用 Environment.Version 判断框架版本"）、
+    运行环境探测失败时降级为「无法读取」且不漏 null、命令路径的引号往返还原与畸形输入安全返回 null、
+    以及文件关联的完整流程（测试根键隔离 → 写入内容逐项核对 → 幂等 → 指向另一份程序的检测 →
+    注销无残留 → 空壳键清理 → exe 不存在时给可读失败原因）。
+    注：**写入注册表这一段在禁止写注册表的环境里会明确 Skip**（本机就是），
+    不判失败也不会让 `--selftest` 恒为红；纯逻辑部分在任何环境都会执行。
 
 ## 3. 目录结构
 
@@ -155,7 +176,13 @@ app.manifest           DPI 感知（PerMonitorV2 / System）+ Win7~Win11 兼容�
 Program.cs             显式入口 [STAThread]；--selftest 先于 XAML 加载执行
 App.xaml(.cs)          服务组装（组合根）+ 全局异常兜底
 SelfTest.cs            自检用例
-build/build.py         构建脚本（工具层禁止直接调 MSBuild.exe，走 Python subprocess 中转；build\ 已被 .gitignore 忽略）
+Properties/
+  AssemblyInfo.cs      程序集信息（产品名 / 版本 / 版权）—— 传统 csproj **必须**有它，见踩坑记录
+packaging/             打包用的源文件（UTF-8，进仓库）：启动器 bat 与说明.txt，打包时转成 GBK
+tools/
+  build.py             构建脚本（工具层禁止直接调 MSBuild.exe，走 Python subprocess 中转）
+  package.py           免安装包打包（读版本号 → 产出绿色版目录 + zip，自带自检）
+  verify-launcher.ps1  启动器分支验证（用伪造的 reg 替身驱动三条分支，见文件头说明）
 Infrastructure/
   ObservableObject.cs  INotifyPropertyChanged 基类
   RelayCommand.cs      同步命令
@@ -181,6 +208,10 @@ Services/
   AppSettings.cs       XML 设置存储（含写入位置探针与回退）
   CrashLogger.cs       崩溃日志落盘（%LOCALAPPDATA%\PS-text\logs，含目录可写探测与轮转）
   ProgressReporter.cs  进度上报（>200ms 才显示，回调回 UI 线程）
+  DotNetRuntimeInfo.cs .NET Framework 版本探测（**读注册表 NDP\v4\Full**，不是 Environment.Version）
+  FileAssociationService.cs 文件关联：只登记"打开方式"、不抢默认；根键可注入以便自检隔离
+  CommandLineOptions.cs 命令行解析（--selftest / --register / --unregister / --assoc-status / --runtime / 图片路径）
+  ConsoleBridge.cs     WinExe 无控制台：AttachConsole 附着父进程，失败则退回弹窗
   Printing/
     PrintUnits.cs        像素 / DIP / 毫米 换算（DPI 感知基础）
     PrintLayout.cs       四种布局模式的版面计算与分页切分
@@ -214,6 +245,7 @@ ViewModels/
   MainViewModel.Annotation.cs   非破坏性标注：对象列表、选中改参数、自动合并（partial）
   MainViewModel.Print.cs        打印与批量打印（partial）
   MainViewModel.Batch.cs        批量流水线：队列、步骤编排、面板内预览、输出命名、逐张执行（partial）
+  MainViewModel.System.cs       系统集成：文件关联、运行环境诊断、日志目录（partial）
   MainViewModel.Settings.cs     主题 / 最近文件 / 进度 / 设置（partial）
   PrintPreviewViewModel.cs      打印预览窗口的视图模型
   ZoomMode.cs
@@ -280,7 +312,8 @@ Resources/             Theme.xaml（结构与控件样式）、Theme.Light/Dark.
 - **几何变换**全部无损：角度为 90° 倍数、裁剪按整数像素，不引入插值。
   裁剪区域自动收敛到图像范围，非法输入返回原图副本而不是抛异常。
 - **文字**：由于排版依赖 WPF 字体渲染，用 `DrawingVisual` + `FormattedText` +
-  `RenderTargetBitmap` 合成（在 UI 线程），再读回像素缓冲并走统一的撤销流程。
+  `RenderTargetBitmap` 合成，再读回像素缓冲并走统一的撤销流程。
+  （当时以为必须回 UI 线程，M3 已证伪并改为线程池执行，见踩坑记录。）
 - 所有新滤镜都通过同一条 `ApplyOneShotAsync` 流程：
   提交待处理预览 → 记录撤销目标 → 后台纯函数计算 → 写入历史。
   因此**每一步都是可撤销的**，且不会阻塞 UI 线程。
@@ -545,6 +578,51 @@ Resources/             Theme.xaml（结构与控件样式）、Theme.Light/Dark.
   这与单张编辑需要三种撤销模型是两件事，不必强行统一。
 - 明确不做：每张图不同参数（要逐张调就先单张编辑）、批量级的 EXIF/ICC 完整保留、水印平铺。
 
+### 步骤 11（M4：可交付）
+
+| 需求 | 实现要点 |
+|---|---|
+| 免安装包 | `tools/package.py` 产出 `build/dist/PS-text-1.0.0-win7-portable/` 与同名 zip：**整包 0.24 MB**，就一个 exe + 启动器 + 说明 |
+| .NET 4.8 检测引导 | 两层：启动器 bat（exe 起不来时给中文提示与安装引导）+ 程序内启动检测（起来了但版本不够时给可读警告） |
+| 文件关联 | HKCU 登记 ProgID / DefaultIcon / Applications / 各扩展名 OpenWithProgids / RegisteredApplications + Capabilities；**只登记"打开方式"，不抢默认** |
+| 界面入口 | 新增「工具」菜单：注册 / 注销 / 查看状态 / 打开系统「设置默认程序」/ 检测运行环境 / 打开日志文件夹 |
+| 命令行 | `--register`、`--unregister`、`--assoc-status`、`--runtime`（无界面，供部署脚本与排查用） |
+| 诊断 | 「关于」升级为带 .NET 版本、进程位数、程序路径、设置文件、日志目录 —— 用户报问题时这几行往往最关键 |
+
+实现要点与取舍：
+
+- **检测要做两层，因为 exe 不一定会起不来**。本项目没有 `App.config`，声明的是 CLR v4.0，
+  因此在只装了 .NET 4.5 / 4.6.2 的 Win7 机器上 **exe 能启动**，却会在用到 4.8 才有的 API 时半路崩。
+  用户看到的是"用着用着就闪退"，无从判断原因。所以：程序内检测覆盖"起来了但版本不够"，
+  启动器 bat 覆盖"根本起不来 + 需要离线安装"两种场景。
+- **4.8 的判定必须读注册表 `Release`，不能读 `Environment.Version`**：
+  任何 .NET Framework 4.x 上 `Environment.Version` 都返回 **4.0.30319**，
+  它报的是 CLR 版本。自检把这条矛盾直接摆出来断言（框架报 4.8 而 CLR 报 4.0），
+  谁想用 `Environment.Version` 走捷径都会立刻看到两条结论对不上。
+- **启动器不用 `reg query` 的 `Release` 比大小**：`reg` 把 REG_DWORD 打印成**十六进制**（`0x82309`），
+  拿它跟 `528040` 比大小必然得出错误结论。改用匹配 `Version` 字符串（`4.8.09221`），
+  一条 `findstr /c:"4.8."` 解决，且与系统语言无关。
+- **自检还跨实现校验了两套判定一致**：启动器看 `Version` 前缀、程序看 `Release` 阈值。
+  两者结论不一致会表现为"启动器放行、程序却弹版本过低"，这种自相矛盾最难解释。
+- **文件关联**走 HKCU（**不需要管理员权限**，绿色版不该要求提权），并且**不抢默认关联** ——
+  从 Vista 起程序就无权静默把自己设为默认，正确做法是登记 ProgID 与 Capabilities，
+  让程序出现在"打开方式"与"设置默认程序"里，把决定权交给用户。
+  注册完还会调 `SHChangeNotify(SHCNE_ASSOCCHANGED)`，否则资源管理器要等下次登录才认。
+- **关联服务的注册表根键是构造参数**，自检传一个 `Software\PSText-SelfTest-<guid>`，
+  把写入 / 幂等 / 状态判定 / 注销 / 清理是否留空壳整条链路真跑一遍，
+  **而绝不碰用户真实的打开方式**。关联写错位置的代价是用户的 .jpg 打不开，不值得冒这个险。
+- **`.ps1` 与 zip 的编码都是坑**，而且都会"看起来没事"：
+  中文 `.ps1` 没有 BOM 时 PowerShell 5.1 会按 ANSI 解析，脚本直接解析失败；
+  zip 里的中文名若按 Python 默认的 UTF-8 + 标志位写，Win7 资源管理器会全显示成乱码。
+  打包脚本因此手动把条目名编成 CP936 并**掩掉** UTF-8 标志位
+  （Python 3.13 的 `writestr` 会强制置这个位，只覆盖 `_encodeFilenameFlags` 不够）。
+- **WinExe 没有控制台**：从命令行运行时 `Console.WriteLine` 会丢进虚空。
+  无界面模式用 `AttachConsole(ATTACH_PARENT_PROCESS)` 附着父进程；附着失败（从资源管理器双击）时退回弹窗，
+  保证结果一定能被人看到。
+- 已知限制：**文件关联的写入流程在本机自检里是 Skip 的** —— 本机工具层会拦下可执行文件对注册表的写入。
+  自检改为先探测"HKCU 能不能写"，不能写就明确 Skip（并保留不依赖注册表写入的纯逻辑断言），
+  而不是让 `--selftest` 在这类机器上恒为红。在普通 Windows 上这 18 项会自动执行。
+
 ## 5. 架构约定（后续步骤必须遵守）
 1. 每个 Service 都有接口定义（`Services\Interfaces`），便于测试与替换
 2. 滤镜算法封装为纯函数：输入 `BitmapSource`，输出 `WriteableBitmap`，无副作用
@@ -621,6 +699,41 @@ Resources/             Theme.xaml（结构与控件样式）、Theme.Light/Dark.
   （本项目保持零警告），而且不持有引用的任务可能被 GC 提前回收。
   统一写成 `_xxxOperation = RunXxxAsync();`，顺带也留出了"必要时能等它"的口子
   —— 自检需要"等批量跑完"，靠的就是这个返回的 Task。
+- **传统（非 SDK）csproj 不消费 `AssemblyTitle` / `AssemblyVersion` 这类属性**：
+  在 csproj 里写了也不报错，但 exe 的属性里版本**永远是 0.0.0.0**，
+  `Assembly.GetName().Version` 也拿到 0.0.0.0（M4 之前一直如此，是加打包脚本时才发现的）。
+  自动生成程序集信息只对 SDK 风格工程生效，传统工程**必须**写 `Properties\AssemblyInfo.cs`。
+  现在版本号只在 `AssemblyInfo.cs` 里出现一次，打包脚本也读它。
+- **判断 .NET Framework 版本不能看 `Environment.Version`**：它返回的是 **CLR** 版本，
+  任何 .NET 4.x 上都报 `4.0.30319`。拿它判断"是不是 4.8"会永远得出错误结论。
+  唯一可靠来源是注册表 `NDP\v4\Full` 的 `Release`。
+- **32 位进程读 `HKLM\SOFTWARE` 会被重定向到 `Wow6432Node`**，
+  而 .NET Framework 的 NDP 键并不保证在所有系统上双向镜像。
+  所以探测**两个注册表视图都读**，取 `Release` 较大的那个。
+- **`reg query` 把 REG_DWORD 打印成十六进制**（`Release    REG_DWORD    0x82309`）。
+  脚本里拿它跟 `528040` 做数值比较必然出错 —— 十六进制串不是 cmd 眼里的数字。
+  改用 `Version` 字符串匹配（`findstr /c:"4.8."`），既不涉及进制也与系统语言无关。
+- **`RenderTargetBitmap` / `DrawingVisual` / `FormattedText` 不要求 UI 线程**：
+  只要求"创建与使用在同一线程"。早先的注释写反了，导致批量每张图都要切回 UI 线程排队；
+  现已改掉并加断言钉住（见自检 [32]）。
+- **WinExe（GUI 子系统）没有控制台**：从 cmd 运行时 `Console.WriteLine` 会丢进虚空，
+  用户看到"命令跑了但没输出"。要 `AttachConsole(ATTACH_PARENT_PROCESS)` 附着父进程；
+  附着失败时退回弹窗，否则从资源管理器双击就什么都看不见。
+- **zip 里的中文文件名**：Python 的 `zipfile` 遇到非 ASCII 名字会写 UTF-8 并置标志位 0x800。
+  Windows 10+ 认这个标志，**Windows 7 的资源管理器不认**，会按 CP936 去解 UTF-8 字节 → 文件名全乱。
+  我们的目标平台包含 Win7，所以手动编成 CP936 且**掩掉**标志位。
+  注意 Python 3.13 的 `ZipFile.writestr` 会**无条件**把 `flag_bits` 置成 0x800
+  （见 `zipfile.py` 里 `zinfo.flag_bits = _MASK_UTF_FILENAME`），
+  只覆盖 `_encodeFilenameFlags` 不够，必须显式 `& ~0x800`
+  —— 否则名字是 CP936、标志位却说"这是 UTF-8"，比不处理更糟：Win7 正常、Win10 乱码。
+- **`.bat` / `.txt` 放进发行包时要用 GBK 写出**：简中 Windows 的命令提示符默认代码页是 936，
+  UTF-8 的中文会显示成乱码。源文件保持 UTF-8（GitHub 上可读），打包时转码。
+- **中文 `.ps1` 必须带 BOM**：PowerShell 5.1 读无 BOM 的 `.ps1` 时按 ANSI 解析，
+  中文注释会被拆成乱码字节，脚本直接解析失败。另外脚本被别的程序调用时要用 `Write-Output`
+  而不是 `Write-Host` —— 后者走信息流，`2>&1` 抓不到，表现为"跑了但没输出"。
+- **执行策略会拦住别人写好的 `.ps1`**（`PSSecurityException: AuthorizationManager 检查失败`）。
+  需要时用 `Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass` 在当前进程内放开，
+  不要改机器级策略。
 
 ## 7. 后续计划
 
@@ -637,10 +750,11 @@ Resources/             Theme.xaml（结构与控件样式）、Theme.Light/Dark.
 | 9（M2b-1） | 仿制图章（纹理背景手工修）+ **区域历史**（只存改动包围盒前后像素） | 已完成 |
 | 10（M2b-2） | **非破坏性标注**（箭头/矩形/椭圆/序号/高亮/文字）+ 对象列表快照历史 + 破坏性操作前自动合并 | 已完成 |
 | 11（M3） | **批量流水线**：有序步骤（缩放/调整/翻转/边框/水印）+ 面板内可信预览 + 原名后缀导出（冲突自动让号） | 已完成 |
-| 12（M4） | 免安装包、.NET 4.8 检测引导、图片文件关联 | 待开始 |
+| 12（M4） | **可交付**：免安装包（0.24 MB zip）、.NET 4.8 两层检测引导、文件关联（只登记"打开方式"）、`--register` 等无界面开关 | 已完成 |
 | 13 | 马赛克 / 模糊遮盖标注（M2b-2 未做：需要像素级预览，比其它矢量标注多一层缓存） | 待开始 |
 | 14 | 标注的八向缩放手柄（当前只能拖动挪位，改尺寸靠删掉重画） | 待开始 |
 | 15 | 批量：水印平铺、每张图独立参数、EXIF/ICC 完整保留 | 待开始 |
+| 16 | 右键菜单集成（"用 PS-text 编辑 / 打印"）、多文档标签页、窗口状态记忆 | 待开始 |
 
 > **产品定位（已拍板）**：走**办公图片处理**路线（裁剪、加字、水印、打印、批量、**消除**），
 > 一句话定位是「能在 Windows 7 干净跑的、零依赖的、中文批量图片处理工具」。
