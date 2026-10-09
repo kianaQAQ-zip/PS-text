@@ -45,6 +45,7 @@
     <Grid.RowDefinitions>
       <RowDefinition Height="Auto" />
       <RowDefinition Height="Auto" />
+      <RowDefinition Height="Auto" />
       <RowDefinition Height="*" />
       <RowDefinition Height="Auto" />
     </Grid.RowDefinitions>
@@ -55,6 +56,8 @@
           Foreground="{DynamicResource ChromeForegroundBrush}">
       <MenuItem Header="文件(_F)">
         <MenuItem Header="打开(_O)…" InputGestureText="Ctrl+O" Command="{Binding OpenCommand}" />
+        <MenuItem Header="关闭当前标签页(_W)" InputGestureText="Ctrl+W"
+                  Command="{Binding CloseCurrentTabCommand}" />
         <MenuItem Header="最近打开(_R)">
           <MenuItem ItemsSource="{Binding RecentFiles}"
                     IsEnabled="{Binding HasRecentFiles}">
@@ -195,8 +198,115 @@
       </DockPanel>
     </Border>
 
+    <!-- ==================== 文档标签栏 ====================
+         标签栏放在**独立的整行**里（而不是挤进中间的某一列），这样它横跨整个窗口宽度，
+         不会因为右侧编辑面板占了 296px 而变得只剩一小截。
+         没有打开的文档时整条隐藏；打开后即使只有一个标签也显示 ——
+         让用户始终看得见"当前在哪一份文档上"。 -->
+    <Border Grid.Row="2"
+            Background="{DynamicResource ChromeBackgroundBrush}"
+            BorderBrush="{DynamicResource BorderBrush}"
+            BorderThickness="0,0,0,1"
+            Visibility="{Binding HasDocument, Converter={StaticResource BoolToVisibility}}">
+      <ScrollViewer HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Disabled"
+                    Padding="4,3">
+        <ItemsControl ItemsSource="{Binding Sessions}">
+          <ItemsControl.ItemsPanel>
+            <ItemsPanelTemplate>
+              <StackPanel Orientation="Horizontal" />
+            </ItemsPanelTemplate>
+          </ItemsControl.ItemsPanel>
+          <ItemsControl.ItemTemplate>
+            <DataTemplate>
+              <Border Margin="1,0" CornerRadius="3">
+                <StackPanel Orientation="Horizontal">
+                  <Button Content="{Binding TabTitle}"
+                          ToolTip="{Binding TabToolTip}"
+                          MinWidth="0" Padding="11,4" Margin="0" Cursor="Hand"
+                          Command="{Binding DataContext.ActivateTabCommand, RelativeSource={RelativeSource AncestorType=ItemsControl}}"
+                          CommandParameter="{Binding}">
+                    <Button.Style>
+                      <Style TargetType="Button">
+                        <Setter Property="Foreground" Value="{DynamicResource SubtleForegroundBrush}" />
+                        <Setter Property="Background" Value="Transparent" />
+                        <Setter Property="BorderThickness" Value="0" />
+                        <Setter Property="Template">
+                          <Setter.Value>
+                            <ControlTemplate TargetType="Button">
+                              <Border x:Name="TabRoot"
+                                      Background="{TemplateBinding Background}"
+                                      CornerRadius="3"
+                                      SnapsToDevicePixels="True">
+                                <ContentPresenter Margin="{TemplateBinding Padding}"
+                                                  HorizontalAlignment="Center"
+                                                  VerticalAlignment="Center" />
+                              </Border>
+                              <ControlTemplate.Triggers>
+                                <Trigger Property="IsMouseOver" Value="True">
+                                  <Setter TargetName="TabRoot" Property="Background"
+                                          Value="{DynamicResource PrimaryHoverBrush}" />
+                                </Trigger>
+                              </ControlTemplate.Triggers>
+                            </ControlTemplate>
+                          </Setter.Value>
+                        </Setter>
+                        <Style.Triggers>
+                          <!-- 当前标签：加粗 + 高亮前景 + 选中底色，三重提示 -->
+                          <DataTrigger Binding="{Binding IsActiveTab}" Value="True">
+                            <Setter Property="Foreground" Value="{DynamicResource ChromeForegroundBrush}" />
+                            <Setter Property="FontWeight" Value="SemiBold" />
+                            <Setter Property="Background" Value="{DynamicResource PrimarySelectedBrush}" />
+                          </DataTrigger>
+                        </Style.Triggers>
+                      </Style>
+                    </Button.Style>
+                  </Button>
+
+                  <Button Content="✕"
+                          ToolTip="关闭这个标签页"
+                          MinWidth="0" Padding="4,4" Margin="0" Cursor="Hand"
+                          FontSize="10"
+                          Command="{Binding DataContext.CloseTabCommand, RelativeSource={RelativeSource AncestorType=ItemsControl}}"
+                          CommandParameter="{Binding}">
+                    <Button.Style>
+                      <Style TargetType="Button">
+                        <Setter Property="Foreground" Value="{DynamicResource SubtleForegroundBrush}" />
+                        <Setter Property="Background" Value="Transparent" />
+                        <Setter Property="BorderThickness" Value="0" />
+                        <Setter Property="Template">
+                          <Setter.Value>
+                            <ControlTemplate TargetType="Button">
+                              <Border x:Name="CloseRoot"
+                                      Background="{TemplateBinding Background}"
+                                      CornerRadius="3"
+                                      SnapsToDevicePixels="True">
+                                <ContentPresenter Margin="{TemplateBinding Padding}"
+                                                  HorizontalAlignment="Center"
+                                                  VerticalAlignment="Center" />
+                              </Border>
+                              <ControlTemplate.Triggers>
+                                <Trigger Property="IsMouseOver" Value="True">
+                                  <Setter TargetName="CloseRoot" Property="Background"
+                                          Value="{DynamicResource PrimaryPressedBrush}" />
+                                  <Setter Property="Foreground" Value="{DynamicResource ChromeForegroundBrush}" />
+                                </Trigger>
+                              </ControlTemplate.Triggers>
+                            </ControlTemplate>
+                          </Setter.Value>
+                        </Setter>
+                      </Style>
+                    </Button.Style>
+                  </Button>
+                </StackPanel>
+              </Border>
+            </DataTemplate>
+          </ItemsControl.ItemTemplate>
+        </ItemsControl>
+      </ScrollViewer>
+    </Border>
+
     <!-- ==================== 画布 + 调整面板 ==================== -->
-    <Grid Grid.Row="2">
+    <Grid Grid.Row="3">
       <Grid.ColumnDefinitions>
         <ColumnDefinition Width="*" MinWidth="240" />
         <ColumnDefinition Width="Auto" />
@@ -1606,7 +1716,7 @@
     </Grid>
 
     <!-- ==================== 状态栏 ==================== -->
-    <Border Grid.Row="3"
+    <Border Grid.Row="4"
             Background="{DynamicResource StatusBarBackgroundBrush}"
             BorderBrush="{DynamicResource BorderBrush}"
             BorderThickness="0,1,0,0">

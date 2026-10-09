@@ -157,6 +157,11 @@ namespace PSText.Views
                         e.Handled = true;
                         return;
 
+                    case Key.W:
+                        ExecuteCommand(viewModel.CloseCurrentTabCommand);
+                        e.Handled = true;
+                        return;
+
                     case Key.O:
                         ExecuteCommand(viewModel.OpenCommand);
                         e.Handled = true;
@@ -388,7 +393,9 @@ namespace PSText.Views
             }
 
             MainViewModel viewModel = ViewModel;
-            if (viewModel == null || !viewModel.IsDirty)
+
+            // 用 HasAnyUnsavedChanges 而不是 IsDirty：多文档下别的标签也可能有未保存的修改。
+            if (viewModel == null || !viewModel.HasAnyUnsavedChanges)
             {
                 return;
             }

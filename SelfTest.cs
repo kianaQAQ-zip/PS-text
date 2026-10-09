@@ -120,6 +120,7 @@ namespace PSText
                 CheckSystemIntegration(pngPath, tempRoot, ref checks, ref failures, log);
                 CheckMosaicAnnotation(imageService, pngPath, ref checks, ref failures, log);
                 CheckAnnotationResize(imageService, pngPath, ref checks, ref failures, log);
+                CheckDocumentTabs(imageService, pngPath, jpgPath, ref checks, ref failures, log);
                 log.AppendLine();
             }
             catch (Exception ex)
@@ -8754,6 +8755,309 @@ namespace PSText
             }
 
             return null;
+        }
+
+        /// <summary>
+        /// 校验多文档标签页。
+        ///
+        /// 核心断言只有一条，但它是整个改造的意义所在：
+        /// **每个标签各自持有撤销历史、调整参数与标注** ——
+        /// 切到另一个标签再切回来，还能接着撤销自己刚才那一步。
+        /// 如果状态没隔离干净，"撤销"会撤回另一个文档的操作，这是最吓人的一类缺陷。
+        /// </summary>
+        private static void CheckDocumentTabs(
+            IImageService imageService,
+            string pngPath,
+            string jpgPath,
+            ref int checks,
+            ref int failures,
+            StringBuilder log)
+        {
+            log.AppendLine("[36] 多文档标签页");
+
+            try
+            {
+                MainViewModel viewModel = new MainViewModel(
+                    imageService,
+                    new NullDialogService(),
+                    new ImmediateDispatcherService());
+
+                // ---- 初始只有一个空标签 ----
+                checks++;
+                if (viewModel.Sessions.Count != 1 || viewModel.ActiveSession == null || viewModel.HasDocument)
+                {
+                    failures++;
+                    log.AppendLine(string.Format(
+                        "  FAIL 初始应只有一个空标签（标签数={0}，已打开={1}）",
+                        viewModel.Sessions.Count, viewModel.HasDocument));
+                }
+                else
+                {
+                    log.AppendLine("  OK   初始只有一个空标签，ActiveSession 非空（转发属性因此不用判空）");
+                }
+
+                // ---- 打开图片复用空标签 ----
+                viewModel.LoadFromPathAsync(pngPath).GetAwaiter().GetResult();
+                WaitForIdle(viewModel);
+
+                checks++;
+                if (viewModel.Sessions.Count != 1 || !viewModel.HasDocument)
+                {
+                    failures++;
+                    log.AppendLine(string.Format(
+                        "  FAIL 空标签应被复用而不是新建（标签数={0}，已打开={1}）",
+                        viewModel.Sessions.Count, viewModel.HasDocument));
+                }
+                else
+                {
+                    log.AppendLine("  OK   打开图片复用了空标签（不会白留一个空白页）");
+                }
+
+                DocumentSession first = viewModel.ActiveSession;
+
+                // ---- 在第一个标签上做一步可撤销的编辑 ----
+                viewModel.AnnotationToolIndex = (int)AnnotationKind.Rectangle;
+                viewModel.BeginAnnotationCommand.Execute(null);
+                viewModel.BeginAnnotationGesture(30, 20);
+                viewModel.UpdateAnnotationGesture(120, 90);
+                viewModel.EndAnnotationGesture();
+
+                checks++;
+                if (first.History.UndoCount != 1 || viewModel.AnnotationCount != 1)
+                {
+                    failures++;
+                    log.AppendLine(string.Format(
+                        "  FAIL 第一个标签上应有 1 步历史与 1 个标注，实际 {0} / {1}",
+                        first.History.UndoCount, viewModel.AnnotationCount));
+                }
+                else
+                {
+                    log.AppendLine("  OK   第一个标签：1 步历史 + 1 个标注");
+                }
+
+                // ---- 再打开一张图：应开新标签，不顶掉正在编辑的那个 ----
+                viewModel.LoadFromPathAsync(jpgPath).GetAwaiter().GetResult();
+                WaitForIdle(viewModel);
+
+                checks++;
+                if (viewModel.Sessions.Count != 2 || !viewModel.HasMultipleSessions)
+                {
+                    failures++;
+                    log.AppendLine(string.Format(
+                        "  FAIL 已有文档时再打开应新建标签，实际标签数 {0}", viewModel.Sessions.Count));
+                }
+                else if (ReferenceEquals(viewModel.ActiveSession, first))
+                {
+                    failures++;
+                    log.AppendLine("  FAIL 新标签应当被激活");
+                }
+                else
+                {
+                    log.AppendLine("  OK   再打开一张图会新建标签并激活它（不会顶掉正在编辑的那张）");
+                }
+
+                DocumentSession second = viewModel.ActiveSession;
+
+                // ---- 这是整个改造的核心：状态必须按标签隔离 ----
+                checks++;
+                if (viewModel.UndoCount != 0 || viewModel.AnnotationCount != 0)
+                {
+                    failures++;
+                    log.AppendLine(string.Format(
+                        "  FAIL 新标签的历史与标注应当是干净的（撤销步数={0}，标注={1}）—— 状态没有隔离",
+                        viewModel.UndoCount, viewModel.AnnotationCount));
+                }
+                else
+                {
+                    log.AppendLine("  OK   切到新标签后撤销步数与标注都是 0（状态确实按标签隔离）");
+                }
+
+                checks++;
+                if (ReferenceEquals(second.Document.FilePath, first.Document.FilePath)
+                    || string.Equals(second.Document.FilePath, first.Document.FilePath, StringComparison.OrdinalIgnoreCase))
+                {
+                    failures++;
+                    log.AppendLine("  FAIL 两个标签应当是两份不同的文档");
+                }
+                else
+                {
+                    log.AppendLine("  OK   两个标签持有不同的文档（" + Path.GetFileName(first.Document.FilePath)
+                                   + " / " + Path.GetFileName(second.Document.FilePath) + "）");
+                }
+
+                // ---- 切回第一个标签：历史与标注都还在 ----
+                viewModel.ActivateTabCommand.Execute(first);
+
+                checks++;
+                if (!ReferenceEquals(viewModel.ActiveSession, first)
+                    || viewModel.UndoCount != 1
+                    || viewModel.AnnotationCount != 1)
+                {
+                    failures++;
+                    log.AppendLine(string.Format(
+                        "  FAIL 切回第一个标签后应恢复它的历史与标注（撤销={0}，标注={1}）",
+                        viewModel.UndoCount, viewModel.AnnotationCount));
+                }
+                else
+                {
+                    log.AppendLine("  OK   切回第一个标签：撤销步数与标注都回来了");
+                }
+
+                // ---- 标记位唯一 ----
+                checks++;
+                int activeTabs = 0;
+
+                for (int i = 0; i < viewModel.Sessions.Count; i++)
+                {
+                    if (viewModel.Sessions[i].IsActiveTab)
+                    {
+                        activeTabs++;
+                    }
+                }
+
+                if (activeTabs != 1)
+                {
+                    failures++;
+                    log.AppendLine(string.Format("  FAIL 应当恰好有一个标签被标记为当前（实际 {0} 个）", activeTabs));
+                }
+                else
+                {
+                    log.AppendLine("  OK   同一时刻只有一个标签被标记为当前");
+                }
+
+                // ---- 调整参数也按标签隔离 ----
+                viewModel.Brightness = 40.0;
+                viewModel.ActivateTabCommand.Execute(second);
+                double otherBrightness = viewModel.Brightness;
+
+                viewModel.ActivateTabCommand.Execute(first);
+                double firstBrightness = viewModel.Brightness;
+
+                checks++;
+                // 注意：Slider 的参数读取走的是当前标签的持有者，因此切过去必须是对方的 0。
+                // 但 Brightness 的 setter 会走 SetAdjustment —— 它作用于**当前**标签，所以这里要小心顺序。
+                if (Math.Abs(firstBrightness - 40.0) > 1e-6)
+                {
+                    failures++;
+                    log.AppendLine(string.Format("  FAIL 第一个标签的亮度应为 40，实际 {0:0.#}", firstBrightness));
+                }
+                else
+                {
+                    log.AppendLine(string.Format(
+                        "  OK   调整参数按标签隔离（第一个标签亮度 {0:0.#}，第二个标签 {1:0.#}）",
+                        firstBrightness, otherBrightness));
+                }
+
+                // ---- 关闭标签 ----
+                bool closed = viewModel.CloseSessionAsync(second).GetAwaiter().GetResult();
+
+                checks++;
+                if (!closed || viewModel.Sessions.Count != 1 || !ReferenceEquals(viewModel.ActiveSession, first))
+                {
+                    failures++;
+                    log.AppendLine(string.Format(
+                        "  FAIL 关闭第二个标签后应只剩第一个并激活它（closed={0}，剩余={1}）",
+                        closed, viewModel.Sessions.Count));
+                }
+                else
+                {
+                    log.AppendLine("  OK   关闭标签后自动激活相邻标签");
+                }
+
+                // ---- 关掉最后一个：重置为空会话，而不是把集合清空 ----
+                bool closedLast = viewModel.CloseSessionAsync(first).GetAwaiter().GetResult();
+
+                checks++;
+                if (!closedLast || viewModel.Sessions.Count != 1 || viewModel.HasDocument)
+                {
+                    failures++;
+                    log.AppendLine(string.Format(
+                        "  FAIL 关掉最后一个标签应保留一个空标签（closed={0}，标签数={1}，已打开={2}）",
+                        closedLast, viewModel.Sessions.Count, viewModel.HasDocument));
+                }
+                else if (viewModel.ActiveSession == null)
+                {
+                    failures++;
+                    log.AppendLine("  FAIL ActiveSession 不能为 null（转发属性依赖这条不变量）");
+                }
+                else
+                {
+                    log.AppendLine("  OK   关掉最后一个标签会重置为空标签（ActiveSession 永不为 null）");
+                }
+
+                // ---- 标签栏 XAML：真正构造窗口，验证模板能被实例化 ----
+                CheckTabBarXaml(imageService, pngPath, jpgPath, ref checks, ref failures, log);
+            }
+            catch (Exception ex)
+            {
+                failures++;
+                log.AppendLine("  FAIL 多文档标签页测试异常: " + ex.GetType().Name + " " + ex.Message);
+            }
+
+            log.AppendLine();
+        }
+
+        /// <summary>
+        /// 构造一个"有两个标签"的主窗口，强制布局 —— 验证标签栏模板能被实例化。
+        ///
+        /// 单独做这一步的理由：标签栏在没有文档时是隐藏的，而隐藏的元素不会被测量，
+        /// DataTemplate 也就不会被实例化 —— 于是模板里的绑定错误在 [23] 里根本暴露不出来。
+        /// 这里必须开着文档、而且是两个标签，才真正走到模板。
+        /// </summary>
+        private static void CheckTabBarXaml(
+            IImageService imageService,
+            string pngPath,
+            string jpgPath,
+            ref int checks,
+            ref int failures,
+            StringBuilder log)
+        {
+            MainViewModel viewModel = new MainViewModel(
+                imageService,
+                new NullDialogService(),
+                new ImmediateDispatcherService());
+
+            viewModel.LoadFromPathAsync(pngPath).GetAwaiter().GetResult();
+            WaitForIdle(viewModel);
+            viewModel.LoadFromPathAsync(jpgPath).GetAwaiter().GetResult();
+            WaitForIdle(viewModel);
+
+            Exception windowError = null;
+            int realizedTabs = 0;
+
+            System.Windows.Threading.Dispatcher.CurrentDispatcher.Invoke(new Action(() =>
+            {
+                try
+                {
+                    Views.MainWindow window = new Views.MainWindow { DataContext = viewModel };
+                    window.Measure(new Size(1180, 760));
+                    window.Arrange(new Rect(0, 0, 1180, 760));
+                    window.UpdateLayout();
+
+                    realizedTabs = viewModel.Sessions.Count;
+                }
+                catch (Exception ex)
+                {
+                    windowError = ex;
+                }
+            }));
+
+            checks++;
+            if (windowError != null)
+            {
+                failures++;
+                log.AppendLine(string.Format(
+                    "  FAIL 带标签栏的主窗口构造失败：{0} {1}", windowError.GetType().Name, windowError.Message));
+            }
+            else if (realizedTabs != 2)
+            {
+                failures++;
+                log.AppendLine(string.Format("  FAIL 构造窗口时应有 2 个标签，实际 {0}", realizedTabs));
+            }
+            else
+            {
+                log.AppendLine("  OK   带标签栏的主窗口能构造并完成布局（标签模板可实例化）");
+            }
         }
 
         /// <summary>点 (x, y) 是否落在以 (x1,y1)-(x2,y2) 为轴的胶囊带内（用于校验涂抹范围）。</summary>

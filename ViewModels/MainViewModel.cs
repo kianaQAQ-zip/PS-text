@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Collections.ObjectModel;
 using System.Globalization;
 using System.IO;
 using System.Threading;
@@ -51,8 +52,6 @@ namespace PSText.ViewModels
         private readonly IDialogService _dialogService;
         private readonly IDispatcherService _dispatcherService;
         private readonly AdjustmentsFilter _adjustmentsFilter = new AdjustmentsFilter();
-        private readonly HistoryManager _history = new HistoryManager(30, 256L * 1024 * 1024);
-        private readonly AdjustmentsHolder _adjustments = new AdjustmentsHolder();
         private readonly AsyncRelayCommand _openCommand;
         private readonly AsyncRelayCommand _saveCommand;
         private readonly AsyncRelayCommand _saveAsCommand;
@@ -60,50 +59,149 @@ namespace PSText.ViewModels
         /// <summary>预览提交防抖计时器（只在 UI 线程使用）。</summary>
         private readonly DispatcherTimer _previewTimer;
 
-        /// <summary>进入调整前解码的源像素缓冲（全分辨率），用于“从基准重算”。</summary>
-        private PixelBuffer _sourceBuffer;
-
-        /// <summary>当前基准缓冲：非空表示正在一次连续调整会话中（撤销应回到 _baseState）。</summary>
-        private PixelBuffer _baseBuffer;
-
-        /// <summary>惰性创建的降采样缓冲（拖动滑块时的预览用）。</summary>
-        private PixelBuffer _previewBuffer;
-
-        /// <summary>基准状态（连续调整会话的撤销目标）。</summary>
-        private EditState _baseState;
-
-        /// <summary>与当前 Document 位图对应的状态（撤销 / 重做的状态链指针）。</summary>
-        private EditState _renderedState;
-
-        /// <summary>只有“基准状态”已被历史记录拥有时，才允许把会话合并进上一条命令。</summary>
-        private bool _baseStateInHistory;
-
-        /// <summary>渲染序号，用于丢弃过期的异步渲染结果。</summary>
-        private int _renderRevision;
-
-        /// <summary>最近一次已渲染完成的调整参数修订号。</summary>
-        private int _lastRenderedRevision = -1;
-
-        /// <summary>最近一次已渲染的调整参数（用于跳过重复的预览渲染）。</summary>
-        private PixelAdjustments _lastRenderedAdjustments;
-
         /// <summary>
-        /// 最近一次**以全分辨率提交**的调整参数。
+        /// 打开的标签页。
         ///
-        /// 必须与 _lastRenderedAdjustments 分开：后者可能只是一次降采样预览的结果。
-        /// 如果提交渲染也拿预览的进度去判断"无需重算"，就会出现
-        /// “预览画出来了、但提交被跳过”，于是历史里没有这一步（曾偶发此缺陷）。
+        /// 不变量：**至少有一个会话，且 ActiveSession 永不为 null** ——
+        /// 关闭最后一个标签时会把它重置为"空会话"，而不是从集合里移除。
+        /// 这条不变量让下面所有转发属性都不需要判空，比到处写 null 检查可靠得多。
         /// </summary>
-        private PixelAdjustments _lastCommittedAdjustments = PixelAdjustments.Neutral;
+        private readonly ObservableCollection<DocumentSession> _sessions =
+            new ObservableCollection<DocumentSession>();
 
-        /// <summary>
-        /// 当前 Document 位图所对应的调整参数（“已提交”语义）。
-        ///
-        /// 必须与 _lastRenderedAdjustments 区分开：后者会被降采样预览更新，
-        /// 而本字段只在真正提交、撤销、重做、加载时更新。
-        /// 若用预览值当作调整会话的基准，撤销就会恢复成“已经调整过”的画面（曾踩此坑）。
-        /// </summary>
-        private PixelAdjustments _committedAdjustments = PixelAdjustments.Neutral;
+        private DocumentSession _activeSession;
+
+        // ============================================================
+        //  按文档隔离的状态
+        //
+        //  下面这些原本是**字段**，现在改成转发到 ActiveSession 的**属性**。
+        //  这样做的好处是：几百处调用点一行都不用改，而"切换标签 = 换一整套状态"
+        //  自动成立。类里所有代码看起来仍然像在操作"当前文档"，
+        //  但实际读写的是当前标签的工作台。
+        // ============================================================
+
+        private ImageDocument _document
+        {
+            get { return _activeSession.Document; }
+            set
+            {
+                if (ReferenceEquals(_activeSession.Document, value))
+                {
+                    return;
+                }
+
+                _activeSession.Document = value;
+                OnDocumentReplaced();
+            }
+        }
+
+        private HistoryManager _history
+        {
+            get { return _activeSession.History; }
+        }
+
+        private List<AnnotationObject> _annotations
+        {
+            get { return _activeSession.Annotations; }
+        }
+
+        private ObservableCollection<AnnotationItemViewModel> _annotationItems
+        {
+            get { return _activeSession.AnnotationItems; }
+        }
+
+        private AdjustmentsHolder _adjustments
+        {
+            get { return _activeSession.Adjustments; }
+        }
+
+        private int _selectedAnnotationIndex
+        {
+            get { return _activeSession.SelectedAnnotationIndex; }
+            set { _activeSession.SelectedAnnotationIndex = value; }
+        }
+
+        private PixelBuffer _sourceBuffer
+        {
+            get { return _activeSession.SourceBuffer; }
+            set { _activeSession.SourceBuffer = value; }
+        }
+
+        private PixelBuffer _previewBuffer
+        {
+            get { return _activeSession.PreviewBuffer; }
+            set { _activeSession.PreviewBuffer = value; }
+        }
+
+        private PixelBuffer _baseBuffer
+        {
+            get { return _activeSession.BaseBuffer; }
+            set { _activeSession.BaseBuffer = value; }
+        }
+
+        private EditState _baseState
+        {
+            get { return _activeSession.BaseState; }
+            set { _activeSession.BaseState = value; }
+        }
+
+        private EditState _renderedState
+        {
+            get { return _activeSession.RenderedState; }
+            set { _activeSession.RenderedState = value; }
+        }
+
+        private bool _baseStateInHistory
+        {
+            get { return _activeSession.BaseStateInHistory; }
+            set { _activeSession.BaseStateInHistory = value; }
+        }
+
+        private int _renderRevision
+        {
+            get { return _activeSession.RenderRevision; }
+            set { _activeSession.RenderRevision = value; }
+        }
+
+        private int _lastRenderedRevision
+        {
+            get { return _activeSession.LastRenderedRevision; }
+            set { _activeSession.LastRenderedRevision = value; }
+        }
+
+        private PixelAdjustments _lastRenderedAdjustments
+        {
+            get { return _activeSession.LastRenderedAdjustments; }
+            set { _activeSession.LastRenderedAdjustments = value; }
+        }
+
+        private PixelAdjustments _lastCommittedAdjustments
+        {
+            get { return _activeSession.LastCommittedAdjustments; }
+            set { _activeSession.LastCommittedAdjustments = value; }
+        }
+
+        private PixelAdjustments _committedAdjustments
+        {
+            get { return _activeSession.CommittedAdjustments; }
+            set { _activeSession.CommittedAdjustments = value; }
+        }
+
+        private double _zoomFactor
+        {
+            get { return _activeSession.ZoomFactor; }
+            set { _activeSession.ZoomFactor = value; }
+        }
+
+        private ZoomMode _zoomMode
+        {
+            get { return _activeSession.ZoomMode; }
+            set { _activeSession.ZoomMode = value; }
+        }
+
+        // ============================================================
+        //  全局（跨标签共享）状态
+        // ============================================================
 
         /// <summary>当前正在显示的是降采样预览位图。</summary>
         private bool _isPreviewing;
@@ -117,9 +215,6 @@ namespace PSText.ViewModels
         /// <summary>最近一次提交未入历史的原因（null 表示正常）。用于诊断偶发竞态。</summary>
         public string LastCommitDiagnostic { get; private set; }
 
-        private ImageDocument _document;
-        private double _zoomFactor = 1.0;
-        private ZoomMode _zoomMode = ZoomMode.FitToWindow;
         private double _viewWidth;
         private double _viewHeight;
         private double _screenDpiX = 96.0;
@@ -154,6 +249,12 @@ namespace PSText.ViewModels
             _dialogService = dialogService;
             _dispatcherService = dispatcherService;
 
+            // 必须**最先**建立空会话：下面所有 InitializeXxxCommands() 都会通过转发属性
+            // 读到 _activeSession，晚一步就会空引用（转发属性刻意不判空，见字段区的说明）。
+            _activeSession = CreateSession(null);
+            _activeSession.IsActiveTab = true;
+            _sessions.Add(_activeSession);
+
             _openCommand = CreateAsyncCommand(OpenImageAsync, () => !IsBusy);
             _saveCommand = CreateAsyncCommand(SaveAsync, () => HasDocument && !IsBusy);
             _saveAsCommand = CreateAsyncCommand(SaveAsAsync, () => HasDocument && !IsBusy);
@@ -170,9 +271,6 @@ namespace PSText.ViewModels
             ResetAdjustmentsCommand = new RelayCommand(
                 () => SetAdjustment(0, 0, 0, 0),
                 () => HasDocument && !IsBusy);
-
-            _adjustments.Changed += (sender, args) => OnAdjustmentsChanged();
-            _history.Changed += (sender, args) => OnHistoryChanged();
 
             // 高级滤镜与裁剪命令（见 MainViewModel.Filters.cs / MainViewModel.Crop.cs）
             InitializeFilterCommands();
@@ -195,8 +293,11 @@ namespace PSText.ViewModels
             // 系统集成：文件关联 / 运行环境 / 日志目录（见 MainViewModel.System.cs）
             InitializeSystemCommands();
 
-            // 设置 / 主题 / 最近文件命令（见 MainViewModel.Settings.cs）
+            // 系统 / 主题 / 最近文件命令（见 MainViewModel.Settings.cs）
             InitializeSettingsCommands();
+
+            // 多文档标签页命令（见 MainViewModel.Tabs.cs）
+            InitializeTabCommands();
 
             _previewTimer = new DispatcherTimer(DispatcherPriority.Background)
             {
@@ -258,32 +359,38 @@ namespace PSText.ViewModels
         public ImageDocument Document
         {
             get { return _document; }
-            private set
-            {
-                if (ReferenceEquals(_document, value))
-                {
-                    return;
-                }
+            private set { _document = value; }
+        }
 
-                _document = value;
-                OnPropertyChanged("Document");
-                OnPropertyChanged("HasDocument");
-                OnPropertyChanged("ImagePixelWidth");
-                OnPropertyChanged("ImagePixelHeight");
-                OnPropertyChanged("IsDirty");
-                OnPropertyChanged("PixelSizeText");
-                OnPropertyChanged("DpiText");
-                OnPropertyChanged("PhysicalSizeText");
-                OnPropertyChanged("FileSizeText");
-                OnPropertyChanged("FileName");
-                OnPropertyChanged("FormatText");
-                OnPropertyChanged("StatusText");
-                OnPropertyChanged("WindowTitle");
+        /// <summary>
+        /// 文档被替换后的统一处理。
+        ///
+        /// 放在**转发属性**的 setter 里而不是公开属性里：这样无论从哪条路改文档
+        /// （公开属性、还是类内部直接写 _document），通知与缓存失效都不会漏 ——
+        /// 漏掉的后果是"界面还显示旧尺寸"或"滑块每动一下都重新解码"这类难查的问题。
+        /// </summary>
+        private void OnDocumentReplaced()
+        {
+            OnPropertyChanged("Document");
+            OnPropertyChanged("HasDocument");
+            OnPropertyChanged("CurrentBitmap");
+            OnPropertyChanged("ImagePixelWidth");
+            OnPropertyChanged("ImagePixelHeight");
+            OnPropertyChanged("IsDirty");
+            OnPropertyChanged("PixelSizeText");
+            OnPropertyChanged("DpiText");
+            OnPropertyChanged("PhysicalSizeText");
+            OnPropertyChanged("FileSizeText");
+            OnPropertyChanged("FileName");
+            OnPropertyChanged("FormatText");
+            OnPropertyChanged("StatusText");
+            OnPropertyChanged("WindowTitle");
 
-                // 位图被整体替换（加载 / 撤销 / 重做 / 调整提交）时，缓存的像素缓冲必须失效。
-                // 例外：降采样预览替换显示位图时必须保留缓冲，否则滑块每动一下都要重新解码。
-                InvalidateAdjustmentCache(_isPreviewing);
-            }
+            _activeSession.RefreshTabCaption();
+
+            // 位图被整体替换（加载 / 撤销 / 重做 / 调整提交）时，缓存的像素缓冲必须失效。
+            // 例外：降采样预览替换显示位图时必须保留缓冲，否则滑块每动一下都要重新解码。
+            InvalidateAdjustmentCache(_isPreviewing);
         }
 
         /// <summary>是否已打开图片。</summary>
@@ -410,11 +517,18 @@ namespace PSText.ViewModels
             get { return _zoomMode; }
             private set
             {
-                if (SetProperty(ref _zoomMode, value, "ZoomMode"))
+                // 不能用 SetProperty(ref ...)：_zoomMode 现在是转发到会话的属性，
+                // 不是字段，没法按引用传递。
+                if (_zoomMode == value)
                 {
-                    OnPropertyChanged("IsFitToWindow");
-                    OnPropertyChanged("IsActualSize");
+                    return;
                 }
+
+                _zoomMode = value;
+
+                OnPropertyChanged("ZoomMode");
+                OnPropertyChanged("IsFitToWindow");
+                OnPropertyChanged("IsActualSize");
             }
         }
 
@@ -713,8 +827,20 @@ namespace PSText.ViewModels
                 return;
             }
 
+            // 当前标签已经装了图 → 开一个新标签再加载，不要顶掉正在编辑的那张。
+            // 反之（空标签）直接复用它，免得每次打开都白留一个空标签。
+            DocumentSession created = null;
+
+            if (_activeSession.HasDocument)
+            {
+                created = CreateSession(null);
+                _sessions.Add(created);
+                ActivateSession(created);
+            }
+
             IsBusy = true;
             StatusMessage = "正在加载：" + Path.GetFileName(filePath);
+            bool loaded = false;
 
             try
             {
@@ -726,6 +852,7 @@ namespace PSText.ViewModels
                 ResetDocumentState();
 
                 Document = ImageDocument.FromLoadResult(result);
+                loaded = true;
 
                 // 加载成功才记入最近文件（需求 P3-16）
                 if (!string.IsNullOrEmpty(result.FilePath))
@@ -774,6 +901,13 @@ namespace PSText.ViewModels
             finally
             {
                 IsBusy = false;
+
+                // 加载失败时把刚建的空标签撤掉，别在标签栏里留一个空白页。
+                if (created != null && !loaded)
+                {
+                    _sessions.Remove(created);
+                    ActivateSession(_sessions[0]);
+                }
             }
         }
 
@@ -954,6 +1088,31 @@ namespace PSText.ViewModels
         ///     保存失败或用户在另存为对话框里取消时 IsDirty 仍为 true，于是拒绝关闭。
         /// </summary>
         public async Task<bool> ConfirmCloseAsync()
+        {
+            // 多文档下要确认的是**全部**未保存的文档：只看当前标签的话，
+            // 关窗口会把别的标签里没保存的修改悄悄丢掉。
+            for (int i = 0; i < _sessions.Count; i++)
+            {
+                DocumentSession session = _sessions[i];
+
+                if (session.Document == null || !session.Document.IsDirty)
+                {
+                    continue;
+                }
+
+                ActivateSession(session);
+
+                if (!await ConfirmActiveDocumentAsync().ConfigureAwait(true))
+                {
+                    return false;
+                }
+            }
+
+            return true;
+        }
+
+        /// <summary>确认当前标签里未保存的修改。返回 true 表示可以继续（已保存或用户放弃）。</summary>
+        private async Task<bool> ConfirmActiveDocumentAsync()
         {
             if (!IsDirty)
             {

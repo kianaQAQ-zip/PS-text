@@ -225,6 +225,8 @@
     <Compile Include="ViewModels\MainViewModel.Print.cs" />
     <Compile Include="ViewModels\MainViewModel.Batch.cs" />
     <Compile Include="ViewModels\MainViewModel.System.cs" />
+    <Compile Include="ViewModels\MainViewModel.Tabs.cs" />
+    <Compile Include="ViewModels\DocumentSession.cs" />
     <Compile Include="ViewModels\MainViewModel.Settings.cs" />
     <Compile Include="ViewModels\PrintPreviewViewModel.cs" />
     <Compile Include="ViewModels\ZoomMode.cs" />

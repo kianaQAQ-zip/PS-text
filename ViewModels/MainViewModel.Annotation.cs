@@ -185,9 +185,9 @@ namespace PSText.ViewModels
         /// <summary>小于该拖动距离视为"点击"而不是"拖拽"。</summary>
         private const double ClickThreshold = 4.0;
 
-        private readonly List<AnnotationObject> _annotations = new List<AnnotationObject>();
-        private readonly ObservableCollection<AnnotationItemViewModel> _annotationItems =
-            new ObservableCollection<AnnotationItemViewModel>();
+        // 注意：_annotations / _annotationItems / _selectedAnnotationIndex 三者
+        // 自 M5 起按文档隔离，定义已移到 MainViewModel.cs 的"按文档隔离的状态"区
+        // （那里是一组转发到 ActiveSession 的属性）。这里不再声明同名字段。
 
         /// <summary>
         /// 遮盖类标注的素材来源。
@@ -207,7 +207,6 @@ namespace PSText.ViewModels
         private double _annotationCoverSize = 12.0;
         private MosaicStyle _annotationMosaicStyle = MosaicStyle.Pixelate;
 
-        private int _selectedAnnotationIndex = -1;
         private bool _isAnnotationDragging;
         private bool _isMovingAnnotation;
         private double _annotationGestureStartX;
