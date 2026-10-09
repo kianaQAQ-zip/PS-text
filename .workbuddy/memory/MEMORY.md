@@ -25,7 +25,7 @@
 - WPF + .NET Framework 4.8，`AnyCPU + Prefer32Bit=true`（32 位运行）。
 - **零第三方 NuGet**——引入任何依赖前必须先向用户确认。
 - 构建产物在 `build/bin`（`Directory.Build.props` 定制），`.csproj` 为传统显式包含（**新文件必须手工加 `<Compile Include>`**）。
-- 自检在 `SelfTest.cs`（约 8,800 行 / **258 断言**），`PSText.exe --selftest` 运行。
+- 自检在 `SelfTest.cs`（约 10,700 行 / **311 断言**），`PSText.exe --selftest` 运行。
   ⚠️ 其中**文件关联的写入流程约 18 项在本机是 Skip 的**（本机工具层拦下可执行文件写注册表，
   已核实非代码问题）。自检先探测 HKCU 可写性，不可写就明确 Skip，避免恒红。
 - MVVM：VM 只依赖 `IImageService / IDialogService / IDispatcherService / IPrintService`，**不得引用 WPF 控件类型**。
@@ -149,3 +149,42 @@
 - 需求决策走 grill 流程：AI 质询 → 用户拍板 → 按 P0/P1/P2 实施。
 - 每阶段交付后跑 `--selftest` 再进下一阶段。
 - 用户 GitHub 账号 `kianaQAQ-zip`，提交身份 `kiana / 1440667466@qq.com`；红线：不得提交真实密钥。当前仓库尚无 `.git`，M0 阶段补。
+
+## 遮盖标注 · 缩放手柄 · 右键菜单（2026-10-09 完成）
+- **遮盖标注**（马赛克 / 模糊）与其它标注的本质区别：内容是**底图的像素级派生**而非几何。
+  做法是把素材做成 `ImageBrush` 当 `Fill` 用 ⇒ **渲染器一行未改**（两边本来就只是 DrawGeometry）。
+- **素材是"拉取"的**：`MosaicSourceProvider` 持一个取像素的委托，每次现取现用
+  ⇒ **不需要任何失效通知**，从根上避免"底图换了忘了失效"。叠加层与合并必须共用同一实例。
+- **马赛克块网格锚定图像坐标 (0,0)**，区域先向外对齐到块边界再处理 ——
+  否则标注每移动一像素块边界就跟着挪，拖动时马赛克会"流动"。
+- **不做整幅预处理缓存**：12MP 整体像素化是 48MB，而按标注矩形现场生成是几十 KB、亚毫秒。
+- **八向缩放手柄**：`Models/AnnotationResize.cs` 是纯函数；
+  手柄尺寸按「屏幕像素 ÷ 缩放」折算；**手柄命中必须优先于"拖动标注"**；
+  文字标注用"与字号成比例的虚拟盒"（几何盒是 1×1 的点）；箭头缩放要保住原始方向（不掉头）。
+- **右键菜单**挂 `SystemFileAssociations\image\shell`（一处覆盖所有图片类型）；
+  用 `MUIVerb` 写显示名；不写 `Extended`（否则要按 Shift）。
+  `--print` **只到打印预览**，刻意不做静默打印。
+
+## 多文档标签页架构（2026-10-09 完成）
+- 每个文档的全部工作台状态收进 `ViewModels/DocumentSession.cs`
+  （撤销历史 / 标注 / 调整参数 / 缓冲区缓存 / 视图缩放 / 选中项）。
+- **改造手法是关键**：`MainViewModel` 里那批私有**字段**改成**转发到 `ActiveSession` 的私有属性**，
+  于是 374 处调用点一行未改，而"切换标签 = 换一整套状态"自动成立。
+  换这类字段前务必先 `grep "ref _"` —— `SetProperty(ref _field, …)` 会报 CS0206。
+- **两条不变量**：① 至少一个标签（关掉最后一个重置为"空会话"而非移除）
+  ⇒ `ActiveSession` 永不为 null ⇒ 转发属性一律不用判空；
+  ② 切换标签必须整体刷新（`RefreshAfterSessionChange`）——撤销步数/滑块/标注/缩放都属于某个文档。
+- `LoadFromPathAsync`：空标签复用、已有文档则开新标签；加载失败撤掉刚建的空标签。
+- `ConfirmCloseAsync` **遍历所有标签**；`MainWindow.OnClosing` 用 `HasAnyUnsavedChanges`。
+- 标签栏是**独立整行**（横跨窗口宽度，不被右侧 296px 面板挤窄）；`IsActiveTab` 由 VM 维护，避免转换器。
+- ⚠️ **隐藏元素不会被测量 ⇒ `DataTemplate` 不会被实例化**，模板里的绑定错误在自检里暴露不出来。
+  自检要覆盖某段模板，必须让它**真的可见并完成布局**。
+
+## 新增踩坑（2026-10-09）
+- **`VisualBounds` 的外扩量必须按类型取**：原来统一 `max(线宽, 字号*0.6)+4`，
+  而 `FontSize` 对所有标注都有默认值 28 ⇒ 4px 粗的矩形也带 20 多像素抓取边距，
+  在旁边点一下会被判成"选中并拖动"而非"新建标注"。现按类型取（细矩形 6 / 文字 20.8 / 箭头 16 / 遮盖 0）。
+- **自检里比对像素前先确认通道**：`CreateHorizontalRamp` 的渐变在**蓝**通道、红恒为 128，
+  用红通道比对等于比常量、断言会变成空转（曾因此让一条断言长期无效）。
+- `AdjustmentsHolder` 是 `internal`，`DocumentSession` 是 `public` ⇒ 相关属性要标 `internal`，否则 CS0053。
+
