@@ -24,10 +24,11 @@
 ## 技术栈与约束（既有，勿擅改）
 - WPF + .NET Framework 4.8，`AnyCPU + Prefer32Bit=true`（32 位运行）。
 - **零第三方 NuGet**——引入任何依赖前必须先向用户确认。
-- 构建产物在 `build/bin`（`Directory.Build.props` 定制），`.csproj` 为传统显式包含。
-- 自检在 `SelfTest.cs`（4,384 行 / 142 断言），`PSText.exe --selftest` 运行。
+- 构建产物在 `build/bin`（`Directory.Build.props` 定制），`.csproj` 为传统显式包含（**新文件必须手工加 `<Compile Include>`**）。
+- 自检在 `SelfTest.cs`（约 7,700 行 / **241 断言**），`PSText.exe --selftest` 运行。
 - MVVM：VM 只依赖 `IImageService / IDialogService / IDispatcherService / IPrintService`，**不得引用 WPF 控件类型**。
 - 滤镜一律写成纯函数：`BitmapSource → WriteableBitmap`，并保持"串行=并行"逐像素一致。
+- 项目保持**零编译警告**：fire-and-forget 的 `Task` 要存进字段（否则 CS4014）。
 
 ## 构建与自检（本机实测可行路径）
 - 构建必须用 VS2022 MSBuild（SDK 9 无 net48 WPF 目标包）：
@@ -42,6 +43,8 @@
 - 日志落在 `build/selftest.log`、`build/bin/Release/selftest.log`、`$TEMP/pstext-selftest.log` 三处。
 - PowerShell 的 `[Reflection.Assembly]::LoadFrom` 也被拦截（等同 Add-Type），
   想验证某个静态方法请**改成加一条自检**，别走反射。
+- 已沉淀脚本 `build/build.py`（`build/` 被 gitignore，换机器需重建）：
+  `"<managed-python>" build/build.py Release`。
 
 ## 版本控制与远端（已配置 · 2026-10-07）
 - 远端：`git@github.com:kianaQAQ-zip/PS-text.git`，分支 `main`，SSH 推送，追踪已建立。
@@ -59,6 +62,16 @@
 - ViewModel 属性名会遮蔽同名类型：曾把属性命名为 `RotationAngle`，压掉了 `Services.Filters.RotationAngle` 枚举，
   导致其它 partial 里的 `RotationAngle.Clockwise90` 编译失败。现命名 `RotationDegrees`。
 - 自检里窗口不 `Show()` → **可视树未建立**，`VisualTreeHelper` 取不到控件；要用 `LogicalTreeHelper` 走逻辑树。
+- **XAML 注释里不能出现 `--`**：`<!-- ---------- 标题 ---------- -->` 是非法 XML，报 `MC3000`。
+  分隔注释统一写 `<!-- ===== 标题 ===== -->`。
+- **`TextBox` 绑 `int`（`UpdateSourceTrigger=PropertyChanged`）**：清空时会转换失败但不会崩，
+  WPF 保留旧值并标红。既有页面都是这么做的，属可接受行为。
+- `ComboBox` 绑枚举用 `SelectedValuePath="Tag"` + `{x:Static ns:Enum.Member}`，
+  比"再维护一个 int 索引属性"少一层需要双向同步的中间状态。
+- **`RenderTargetBitmap` / `DrawingVisual` / `FormattedText` 不要求 UI 线程**，
+  只要求"创建与使用在同一线程"。已验证：整条含文字水印的批量流水线在线程池线程跑通（自检 [32]）。
+- **自检里不能轮询"批量跑完没有"**：批量入口刻意返回 `Task`（`internal Task RunBatchAsync()`），
+  自检 `GetAwaiter().GetResult()` 直接等它，不靠 sleep 猜。
 
 ## 撤销架构（三种模型，按编辑类型选）
 1. **整幅压缩快照**（`EditState` + `BufferEditCommand`）：滤镜 / 裁剪 / 缩放 / 旋转等"一次性、改尺寸"的编辑。
@@ -74,6 +87,24 @@
      合并本身是**一步独立历史**（所以撤销两次才回到"标注可编辑"）。
    - 导出与打印用**副本**烘焙，不破坏编辑现场。
    - 叠加层与合并渲染**共用同一份几何**（`AnnotationVisualBuilder`）—— 否则会"所见非所得"。
+
+4. **批量流水线不需要撤销** —— 它只写新文件、原文件不动，天然可重来。
+   不要为了"架构统一"给它硬塞一套撤销模型。
+
+## 批量流水线（M3 · 2026-10-09 完成）
+- 结构：**有序步骤列表**（缩放/调整/翻转旋转/边框/水印）套到一批文件上，导出为"原名 + 后缀"。
+- 顺序是**产品语义**而非实现细节：先缩放后加水印 vs 反之，水印像素宽度实测 81px vs 40px。
+- `BatchContext.Scale` 是"面板预览不骗人"的地基。**绝对**像素参数乘 Scale，**相对**参数（百分比）不乘。
+  自检断言：长边 800 → 全分辨率 800×600 / 半缩放预览 400×300；百分比模式两种上下文同值。
+- 水印默认"按图像宽度百分比"（批量图尺寸不一，固定像素会让大图看不见、小图占满屏）。
+- **预览不做 EXIF 方向校正就会骗人**：`IImageService.LoadPreviewAsync` 的
+  `decodePixelWidth` 分支**不做**方向校正（见 `WpfImageService.Decode`），
+  所以批量预览改为"整幅解码 → 降采样 → 套流水线"。
+- 输出命名必须防**三种**覆盖：磁盘同名 / **同一次运行内已分配的名字** / 源文件本身。
+  中间那条最容易漏：来自不同文件夹的同名文件撞名时磁盘上还没有第二个文件，`File.Exists` 查不出来
+  → 必须额外维护"已分配路径"集合（`HashSet<string>` + `OrdinalIgnoreCase`）。
+- GIF 输入在"沿用原格式"时改写为 PNG（256 色 + 多帧会被压成单帧，会静默毁画质）。
+- `BatchResizeStep.ReadTargetSize` 是 `internal`，自检直接调它钉住缩放换算（比端到端更快更稳）。
 
 ## 已记录的经验
 - 重采样必须"缩小时按比例展宽核"才抗混叠；必须"预乘 alpha 再还原"才不会在透明边缘出黑边。
