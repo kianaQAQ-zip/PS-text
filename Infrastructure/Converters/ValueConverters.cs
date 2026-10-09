@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.Windows;
 using System.Windows.Data;
+using System.Windows.Input;
 
 namespace PSText.Infrastructure.Converters
 {
@@ -121,6 +122,46 @@ namespace PSText.Infrastructure.Converters
         public object ConvertBack(object value, Type targetType, object parameter, CultureInfo culture)
         {
             // 反向转换由命令处理，这里不实现（避免绑定回写把枚举改坏）。
+            return System.Windows.Data.Binding.DoNothing;
+        }
+    }
+
+    /// <summary>
+    /// 光标名称 → <see cref="Cursor"/>。
+    ///
+    /// 为什么让 ViewModel 出"名字"而不是直接出 Cursor：光标属于控件外观，
+    /// 按项目约定 code-behind 只转发手势、不设置外观，所以这里用一层转换
+    /// 把"该显示什么光标"这个判断留在 ViewModel、把 WPF 类型挡在外面。
+    /// 空名（没有手柄命中）统一显示为十字准星 —— 与标注模式的默认光标一致。
+    /// </summary>
+    public sealed class CursorNameConverter : IValueConverter
+    {
+        public object Convert(object value, Type targetType, object parameter, CultureInfo culture)
+        {
+            string name = value as string;
+
+            if (string.IsNullOrEmpty(name))
+            {
+                return Cursors.Cross;
+            }
+
+            switch (name)
+            {
+                case "SizeNWSE":
+                    return Cursors.SizeNWSE;
+                case "SizeNESW":
+                    return Cursors.SizeNESW;
+                case "SizeNS":
+                    return Cursors.SizeNS;
+                case "SizeWE":
+                    return Cursors.SizeWE;
+                default:
+                    return Cursors.Cross;
+            }
+        }
+
+        public object ConvertBack(object value, Type targetType, object parameter, CultureInfo culture)
+        {
             return System.Windows.Data.Binding.DoNothing;
         }
     }

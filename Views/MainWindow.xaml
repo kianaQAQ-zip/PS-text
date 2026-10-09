@@ -30,6 +30,7 @@
     -->
     <conv:BooleanToVisibilityConverter x:Key="BoolToVisibility" />
     <conv:MultiplyConverter x:Key="Multiply" />
+    <conv:CursorNameConverter x:Key="CursorName" />
 
     <!-- 状态栏：缩放百分比（粗体），基于应用级 StatusTextStyle -->
     <Style x:Key="ZoomTextStyle" TargetType="TextBlock" BasedOn="{StaticResource StatusTextStyle}">
@@ -113,7 +114,7 @@
 
       <MenuItem Header="工具(_T)">
         <MenuItem Header="文件关联">
-          <MenuItem Header="注册（加入“打开方式”列表）"
+          <MenuItem Header="注册（打开方式 + 右键菜单）"
                     Command="{Binding RegisterFileAssociationCommand}" />
           <MenuItem Header="注销"
                     Command="{Binding UnregisterFileAssociationCommand}" />
@@ -397,7 +398,7 @@
                     HorizontalAlignment="Center"
                     VerticalAlignment="Center"
                     Background="Transparent"
-                    Cursor="Cross"
+                    Cursor="{Binding AnnotationCursorName, Converter={StaticResource CursorName}}"
                     MouseLeftButtonDown="OnAnnotationMouseDown"
                     MouseMove="OnAnnotationMouseMove"
                     MouseLeftButtonUp="OnAnnotationMouseUp"
@@ -421,6 +422,31 @@
                             Stroke="{Binding StrokeBrush}"
                             StrokeThickness="{Binding StrokeThickness}" />
                       <Path Data="{Binding LabelGeometry}" Fill="{Binding LabelBrush}" />
+                    </Canvas>
+                  </DataTemplate>
+                </ItemsControl.ItemTemplate>
+              </ItemsControl>
+
+              <!-- 缩放手柄：选中标注后出现。
+                   坐标是图像像素，但尺寸/描边都按「屏幕像素 ÷ 缩放」折算过，
+                   所以放大到 800% 或缩到 10%，手柄看起来都一样大、一样好点中。 -->
+              <ItemsControl ItemsSource="{Binding AnnotationHandles}" IsHitTestVisible="False">
+                <ItemsControl.ItemsPanel>
+                  <ItemsPanelTemplate>
+                    <Canvas />
+                  </ItemsPanelTemplate>
+                </ItemsControl.ItemsPanel>
+                <ItemsControl.ItemTemplate>
+                  <DataTemplate>
+                    <Canvas>
+                      <Rectangle Canvas.Left="{Binding Left}"
+                                 Canvas.Top="{Binding Top}"
+                                 Width="{Binding Size}"
+                                 Height="{Binding Size}"
+                                 Fill="White"
+                                 Stroke="#FF1E6FD9"
+                                 StrokeThickness="{Binding StrokeThickness}"
+                                 RadiusX="1.5" RadiusY="1.5" />
                     </Canvas>
                   </DataTemplate>
                 </ItemsControl.ItemTemplate>
@@ -1008,6 +1034,7 @@
                   <ComboBoxItem Content="序号（自动编号）" />
                   <ComboBoxItem Content="高亮" />
                   <ComboBoxItem Content="文字" />
+                  <ComboBoxItem Content="马赛克 / 模糊遮盖" />
                 </ComboBox>
 
                 <StackPanel Orientation="Horizontal" Margin="0,12,0,0">
@@ -1054,6 +1081,28 @@
                 <TextBox Text="{Binding AnnotationText, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
                          IsEnabled="{Binding HasDocument}" />
 
+                <!-- 遮盖参数：当前工具是遮盖，或选中了一个遮盖标注时显示 -->
+                <StackPanel Visibility="{Binding ShowCoverControls, Converter={StaticResource BoolToVisibility}}">
+                  <TextBlock Text="遮盖方式" Margin="0,10,0,0" Style="{StaticResource StatusLabelStyle}" />
+                  <ComboBox SelectedIndex="{Binding AnnotationMosaicStyleIndex, Mode=TwoWay}">
+                    <ComboBoxItem Content="马赛克（块平均，适合文字 / 号码）" />
+                    <ComboBoxItem Content="模糊（适合人脸 / 背景）" />
+                  </ComboBox>
+
+                  <DockPanel Margin="0,10,0,0" LastChildFill="False">
+                    <TextBlock DockPanel.Dock="Left" Text="强度" Style="{StaticResource StatusLabelStyle}" Margin="0" />
+                    <TextBlock DockPanel.Dock="Right" MinWidth="86" TextAlignment="Right"
+                               Style="{StaticResource StatusTextStyle}" Margin="0"
+                               Text="{Binding AnnotationCoverText}" />
+                  </DockPanel>
+                  <Slider Minimum="2" Maximum="120" TickFrequency="2" SmallChange="1" LargeChange="4"
+                          IsEnabled="{Binding HasDocument}"
+                          Value="{Binding AnnotationCoverSize, Mode=TwoWay}" />
+                  <TextBlock Margin="0,2,0,0" FontSize="11" TextWrapping="Wrap"
+                             Foreground="{DynamicResource SubtleForegroundBrush}"
+                             Text="块 / 半径越大遮得越彻底。马赛克块锚定在图像坐标网格上，所以拖动标注时方块不会“流动”。" />
+                </StackPanel>
+
                 <TextBlock Text="{Binding SelectedAnnotationInfoText}" Margin="0,12,0,0" FontSize="11" TextWrapping="Wrap"
                            Foreground="{DynamicResource SubtleForegroundBrush}" />
 
@@ -1077,6 +1126,10 @@
                 <TextBlock Text="2. 在画布上拖拽绘制；序号 / 文字点一下即可落点" Margin="0,4,0,0" FontSize="11" TextWrapping="Wrap"
                            Foreground="{DynamicResource SubtleForegroundBrush}" />
                 <TextBlock Text="3. 点击已有标注即可选中，改颜色 / 线宽 / 字号会立即生效，拖动可挪位" Margin="0,4,0,0" FontSize="11" TextWrapping="Wrap"
+                           Foreground="{DynamicResource SubtleForegroundBrush}" />
+                <TextBlock Text="4. 选中后四周会出现 8 个白色手柄：拖手柄改尺寸（Shift 保持宽高比，Alt 以中心为基准）。文字标注拖角是改字号" Margin="0,4,0,0" FontSize="11" TextWrapping="Wrap"
+                           Foreground="{DynamicResource SubtleForegroundBrush}" />
+                <TextBlock Text="5. 遮盖（马赛克 / 模糊）的内容取自底图，拖动时实时重算；导出或合并时才会真正写进像素" Margin="0,4,0,0" FontSize="11" TextWrapping="Wrap"
                            Foreground="{DynamicResource SubtleForegroundBrush}" />
                 <TextBlock Text="每一步都可 Ctrl+Z 撤销（历史里存的是对象列表快照，非常省内存）" Margin="0,8,0,0" FontSize="11" TextWrapping="Wrap"
                            Foreground="{DynamicResource SubtleForegroundBrush}" />

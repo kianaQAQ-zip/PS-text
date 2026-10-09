@@ -24,9 +24,16 @@ namespace PSText.Services.Filters
     public static class AnnotationRenderer
     {
         /// <summary>把标注合并进一份像素拷贝；没有标注时原样返回。</summary>
+        /// <param name="source">底图像素。</param>
+        /// <param name="objects">标注对象列表。</param>
+        /// <param name="coverProvider">
+        /// 遮盖类标注的素材来源。必须与叠加层用的是**同一个实例**，
+        /// 否则预览与合并的马赛克相位可能不一致（所见非所得）。
+        /// </param>
         public static PixelBuffer Render(
             PixelBuffer source,
-            IReadOnlyList<AnnotationObject> objects)
+            IReadOnlyList<AnnotationObject> objects,
+            IMosaicSourceProvider coverProvider = null)
         {
             if (source == null)
             {
@@ -105,7 +112,7 @@ namespace PSText.Services.Filters
                         continue;
                     }
 
-                    AnnotationVisual visual = AnnotationVisualBuilder.Build(item);
+                    AnnotationVisual visual = AnnotationVisualBuilder.Build(item, coverProvider);
 
                     if (visual.Geometry != null && visual.Geometry != Geometry.Empty)
                     {

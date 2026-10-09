@@ -167,6 +167,7 @@
     <Compile Include="Models\RegionEditCommand.cs" />
     <Compile Include="Models\AnnotationObject.cs" />
     <Compile Include="Models\AnnotationEditCommand.cs" />
+    <Compile Include="Models\AnnotationResize.cs" />
   </ItemGroup>
 
   <!-- ============ 服务 ============ -->
@@ -201,6 +202,8 @@
     <Compile Include="Services\Filters\CloneStampFilter.cs" />
     <Compile Include="Services\Filters\AnnotationVisualBuilder.cs" />
     <Compile Include="Services\Filters\AnnotationRenderer.cs" />
+    <Compile Include="Services\Filters\MosaicFilter.cs" />
+    <Compile Include="Services\Filters\MosaicSourceProvider.cs" />
     <Compile Include="Services\Filters\BorderFilters.cs" />
     <Compile Include="Services\Filters\TextOverlayFilter.cs" />
     <Compile Include="Services\Batch\BatchStep.cs" />

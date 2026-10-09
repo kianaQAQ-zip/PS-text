@@ -391,6 +391,10 @@ namespace PSText.ViewModels
                 OnPropertyChanged("ZoomFactor");
                 OnPropertyChanged("ZoomPercentText");
                 OnPropertyChanged("StatusText");
+
+                // 标注手柄要按**屏幕像素**保持恒定大小，因此缩放一变就得重算它们的尺寸。
+                // （见 MainViewModel.Annotation.cs；没打开图片时集合为 null，那边会自己防护。）
+                RebuildAnnotationHandles();
             }
         }
 

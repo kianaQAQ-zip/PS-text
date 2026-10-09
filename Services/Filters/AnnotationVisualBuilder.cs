@@ -38,7 +38,7 @@ namespace PSText.Services.Filters
         /// <summary>箭头头的最大长度（像素）。</summary>
         private const double MaxArrowHeadLength = 26.0;
 
-        public static AnnotationVisual Build(AnnotationObject item)
+        public static AnnotationVisual Build(AnnotationObject item, IMosaicSourceProvider coverProvider = null)
         {
             AnnotationVisual visual = new AnnotationVisual
             {
@@ -100,6 +100,27 @@ namespace PSText.Services.Filters
                 case AnnotationKind.Text:
                     visual.Geometry = BuildLabelAt(item, item.Text, item.FontSize, item.X1, item.Y1);
                     visual.Fill = strokeBrush;
+                    break;
+
+                case AnnotationKind.Mosaic:
+                    // 遮盖与其它标注的本质区别：填充的不是颜色，而是**底图的像素级派生**。
+                    // 这里把素材做成 ImageBrush 直接当 Fill 用，于是叠加层与合并渲染
+                    // 完全不需要为它写特例 —— 两边本来就只是 DrawGeometry(Fill, pen, geo)。
+                    visual.Geometry = Freeze(new RectangleGeometry(
+                        new Rect(item.Left, item.Top, item.Width, item.Height)));
+
+                    visual.Fill = coverProvider == null ? null : coverProvider.CreateCoverBrush(item);
+
+                    if (visual.Fill == null)
+                    {
+                        // 素材拿不到（例如还没打开图片）时给一个半透明占位，
+                        // 免得标注"凭空消失"让人以为工具坏了。导出前一定会重新取素材，
+                        // 因此占位不会进最终结果。
+                        SolidColorBrush placeholder = new SolidColorBrush(Color.FromArgb(0x60, 0x80, 0x80, 0x80));
+                        placeholder.Freeze();
+                        visual.Fill = placeholder;
+                    }
+
                     break;
             }
 

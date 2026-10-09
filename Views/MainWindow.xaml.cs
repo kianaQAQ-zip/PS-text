@@ -879,11 +879,6 @@ namespace PSText.Views
                 return;
             }
 
-            if (e.LeftButton != MouseButtonState.Pressed)
-            {
-                return;
-            }
-
             double imageX;
             double imageY;
 
@@ -892,7 +887,22 @@ namespace PSText.Views
                 return;
             }
 
-            viewModel.UpdateAnnotationGesture(imageX, imageY);
+            if (e.LeftButton != MouseButtonState.Pressed)
+            {
+                // 悬停：让指针形状反映"这里能拖角改尺寸"。
+                // 只把坐标转过去，具体显示什么光标由 ViewModel 决定（外观不在这里设置）。
+                viewModel.UpdateAnnotationCursor(imageX, imageY);
+                return;
+            }
+
+            ModifierKeys modifiers = Keyboard.Modifiers;
+
+            viewModel.UpdateAnnotationGesture(
+                imageX,
+                imageY,
+                (modifiers & ModifierKeys.Shift) == ModifierKeys.Shift,
+                (modifiers & ModifierKeys.Alt) == ModifierKeys.Alt);
+
             e.Handled = true;
         }
 

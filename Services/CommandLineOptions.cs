@@ -49,6 +49,15 @@ namespace PSText.Services
         /// <summary>要打开的图片路径（仅 OpenWindow 模式；没有则为 null）。</summary>
         public string ImagePath { get; private set; }
 
+        /// <summary>
+        /// 打开图片后直接进入打印预览（<c>--print</c>）。
+        ///
+        /// 这是给右键菜单"用 PS-text 打印"用的。刻意只到预览为止：
+        /// Windows 自己的图片"打印"动词也是弹向导的，静默打印会造成
+        /// "怎么突然多出一沓纸"这种事故。
+        /// </summary>
+        public bool PrintAfterLoad { get; private set; }
+
         /// <summary>原始参数。</summary>
         public string[] RawArguments { get; private set; }
 
@@ -70,6 +79,7 @@ namespace PSText.Services
             // 其余开关互斥，先出现的赢。
             StartupMode mode = StartupMode.OpenWindow;
             string imagePath = null;
+            bool printAfterLoad = false;
 
             for (int i = 0; i < args.Length; i++)
             {
@@ -87,6 +97,12 @@ namespace PSText.Services
 
                 if (mode == StartupMode.OpenWindow)
                 {
+                    if (TryMatchSwitch(argument, "--print"))
+                    {
+                        printAfterLoad = true;
+                        continue;
+                    }
+
                     if (TryMatchSwitch(argument, "--register"))
                     {
                         mode = StartupMode.RegisterAssociation;
@@ -127,9 +143,12 @@ namespace PSText.Services
             if (mode != StartupMode.OpenWindow)
             {
                 imagePath = null;
+                printAfterLoad = false;
             }
 
-            return new CommandLineOptions(mode, imagePath, args);
+            CommandLineOptions options = new CommandLineOptions(mode, imagePath, args);
+            options.PrintAfterLoad = printAfterLoad;
+            return options;
         }
 
         private static bool TryMatchSwitch(string argument, string name)

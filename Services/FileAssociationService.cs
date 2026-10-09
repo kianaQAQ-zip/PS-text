@@ -35,6 +35,12 @@ namespace PSText.Services
         /// <summary>RegisteredApplications 下的值名，也是传给"默认程序"界面的名字。</summary>
         public const string ApplicationRegistryName = "PS-text";
 
+        /// <summary>右键菜单里"编辑"动词的键名。</summary>
+        public const string EditVerbName = "PSText.Edit";
+
+        /// <summary>右键菜单里"打印"动词的键名。</summary>
+        public const string PrintVerbName = "PSText.Print";
+
         /// <summary>友好名称（"打开方式"里显示的名字）。</summary>
         public const string FriendlyName = "PS-text 图片编辑器";
 
@@ -136,6 +142,18 @@ namespace PSText.Services
             get { return CapabilitiesRootPath + @"\Capabilities"; }
         }
 
+        /// <summary>
+        /// 右键菜单动词的父键。
+        ///
+        /// 挂在 <c>SystemFileAssociations\image</c> 下，而不是逐个扩展名各挂一份：
+        /// 这一处就能覆盖所有"感知类型为图片"的文件（jpg / png / bmp / gif / tif …），
+        /// 注销时也只有一个地方要清理，不容易留下残渣。
+        /// </summary>
+        private string ShellVerbsRootPath
+        {
+            get { return ClassesPath + @"\SystemFileAssociations\image\shell"; }
+        }
+
         #region 状态查询
 
         public FileAssociationState GetState()
@@ -180,6 +198,18 @@ namespace PSText.Services
         public string RegisteredCommandText
         {
             get { return ReadString(_hive, ProgIdPath + @"\shell\open\command", null); }
+        }
+
+        /// <summary>右键菜单动词是否已登记（两个都在才算）。</summary>
+        public bool HasContextMenu
+        {
+            get
+            {
+                return !string.IsNullOrWhiteSpace(
+                           ReadString(_hive, ShellVerbsRootPath + @"\" + EditVerbName + @"\command", null))
+                       && !string.IsNullOrWhiteSpace(
+                           ReadString(_hive, ShellVerbsRootPath + @"\" + PrintVerbName + @"\command", null));
+            }
         }
 
         #endregion
@@ -276,6 +306,9 @@ namespace PSText.Services
                         RegistryValueKind.String);
                 }
 
+                // 5) 右键菜单（"用 PS-text 编辑 / 打印"）
+                WriteShellVerbs();
+
                 NotifyShell();
                 return FileAssociationResult.Ok(BuildRegisterSummary());
             }
@@ -334,7 +367,6 @@ namespace PSText.Services
                 }
 
                 DeleteTree(_hive, CapabilitiesPath);
-
                 // 只在确实空了的时候才删 PS-text 这一层，别把将来可能放在这里的别的数据带走。
                 bool capabilitiesRootEmpty;
                 using (RegistryKey key = OpenKey(_hive, CapabilitiesRootPath, false))
@@ -357,6 +389,13 @@ namespace PSText.Services
                     }
                 }
 
+                // 右键菜单：动词键与它的 command 子键一起删；shell 空了就删掉，
+                // 但**不动** SystemFileAssociations\image 这一层 —— 那是系统结构，
+                // 别的程序也可能往里挂东西，不该由我们来清理。
+                DeleteTree(_hive, ShellVerbsRootPath + @"\" + EditVerbName);
+                DeleteTree(_hive, ShellVerbsRootPath + @"\" + PrintVerbName);
+                DeleteKeyIfEmpty(_hive, ShellVerbsRootPath);
+
                 NotifyShell();
                 return FileAssociationResult.Ok("已注销文件关联。文件仍可通过“打开方式 → 选择其他应用”使用。");
             }
@@ -371,6 +410,50 @@ namespace PSText.Services
             catch (IOException ex)
             {
                 return FileAssociationResult.Fail("修改注册表时出错，注销失败：" + ex.Message);
+            }
+        }
+
+        #endregion
+
+        #region 右键菜单
+
+        /// <summary>
+        /// 写两个右键菜单动词。
+        ///
+        /// 用 <c>MUIVerb</c> 而不是默认值来写显示名：默认值在资源管理器里
+        /// 会走一套老的解析规则（会被当成"动词名"再去找本地化字符串），
+        /// MUIVerb 才是给用户看的那个名字。
+        ///
+        /// 不加 <c>Extended</c> 值，因此**不需要按住 Shift** 就能看到。
+        /// </summary>
+        private void WriteShellVerbs()
+        {
+            string exe = Quote(_exePath);
+            string icon = exe + ",0";
+
+            using (RegistryKey key = CreateKey(_hive, ShellVerbsRootPath + @"\" + EditVerbName))
+            {
+                key.SetValue("MUIVerb", "用 PS-text 编辑", RegistryValueKind.String);
+                key.SetValue("Icon", icon, RegistryValueKind.String);
+            }
+
+            using (RegistryKey key = CreateKey(_hive, ShellVerbsRootPath + @"\" + EditVerbName + @"\command"))
+            {
+                key.SetValue(null, exe + " \"%1\"", RegistryValueKind.String);
+            }
+
+            using (RegistryKey key = CreateKey(_hive, ShellVerbsRootPath + @"\" + PrintVerbName))
+            {
+                key.SetValue("MUIVerb", "用 PS-text 打印", RegistryValueKind.String);
+                key.SetValue("Icon", icon, RegistryValueKind.String);
+            }
+
+            using (RegistryKey key = CreateKey(_hive, ShellVerbsRootPath + @"\" + PrintVerbName + @"\command"))
+            {
+                // --print：打开图片后直接进打印预览。
+                // 刻意**不做**静默打印：Windows 自己的图片"打印"动词也是弹向导的，
+                // 悄悄把文件送去打印机会造成"怎么多出来一沓纸"的事故。
+                key.SetValue(null, exe + " --print \"%1\"", RegistryValueKind.String);
             }
         }
 
@@ -541,8 +624,9 @@ namespace PSText.Services
         {
             return string.Format(
                 CultureInfo.InvariantCulture,
-                "已注册文件关联。{0} 现在会出现在 {1} 种图片扩展名的“打开方式”列表里"
-                + "（默认打开程序不会被改动，如需设为默认请在系统的“设置默认程序”里选择）。",
+                "已注册文件关联。{0} 现在会出现在 {1} 种图片扩展名的“打开方式”列表里，"
+                + "右键菜单里也会多出“用 PS-text 编辑 / 打印”两项。\n\n"
+                + "默认打开程序不会被改动，如需设为默认请在系统的“设置默认程序”里选择。",
                 FriendlyName,
                 Extensions.Length);
         }

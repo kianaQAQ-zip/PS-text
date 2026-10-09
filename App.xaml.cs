@@ -68,11 +68,23 @@ namespace PSText
 
             MainWindow window = new MainWindow { DataContext = viewModel };
 
-            // 支持通过命令行传入图片路径（例如“打开方式”关联）
+            // 支持通过命令行传入图片路径（例如“打开方式”关联），
+            // --print 则在加载完成后直接进入打印预览（右键菜单的“用 PS-text 打印”）。
             string initialFile = options.ImagePath;
             if (!string.IsNullOrWhiteSpace(initialFile))
             {
-                window.Loaded += async (sender, eventArgs) => await viewModel.LoadFromPathAsync(initialFile);
+                bool printAfterLoad = options.PrintAfterLoad;
+
+                window.Loaded += async (sender, eventArgs) =>
+                {
+                    await viewModel.LoadFromPathAsync(initialFile);
+
+                    if (printAfterLoad)
+                    {
+                        // 只到预览为止，不静默打印 —— 见 CommandLineOptions.PrintAfterLoad 的说明。
+                        viewModel.PrintPreviewCommand.Execute(null);
+                    }
+                };
             }
 
             // 运行环境提醒。
@@ -179,6 +191,7 @@ namespace PSText
             }
 
             builder.AppendLine("ProgID：" + service.ProgId);
+            builder.AppendLine("右键菜单：" + (service.HasContextMenu ? "已添加（用 PS-text 编辑 / 打印）" : "未添加"));
             builder.AppendLine("打开命令：" + (service.RegisteredCommandText ?? "（无）"));
             builder.AppendLine();
             builder.AppendLine("注册：PS-text.exe --register");

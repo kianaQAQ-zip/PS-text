@@ -121,12 +121,14 @@ namespace PSText.ViewModels
             }
 
             string confirmMessage = register
-                ? "把 PS-text 登记到图片文件的“打开方式”列表里。\n\n"
+                ? "把 PS-text 登记到图片文件的“打开方式”列表里，并添加右键菜单项。\n\n"
                   + "· 只写当前用户的注册表，**不需要管理员权限**；\n"
                   + "· **不会**改动你现有的默认打开程序；\n"
+                  + "· 右键菜单会多出“用 PS-text 编辑”与“用 PS-text 打印”两项\n"
+                  + "  （打印只到预览为止，不会直接送打印机）；\n"
                   + "· 想让它成为默认打开程序，可在系统「设置默认程序」里自行选择。\n\n"
                   + "确定要注册吗？"
-                : "移除 PS-text 在图片文件“打开方式”列表里的登记。\n\n"
+                : "移除 PS-text 在图片“打开方式”列表与右键菜单里的登记。\n\n"
                   + "已保存的图片文件不受影响，之后仍可通过系统的“打开方式 → 选择其他应用”使用。\n\n"
                   + "确定要注销吗？";
 
@@ -190,11 +192,12 @@ namespace PSText.ViewModels
 
                 string text = string.Format(
                     CultureInfo.InvariantCulture,
-                    "{0}\n\nProgID：{1}\n关联扩展名：{2} 种\n打开命令：{3}\n\n"
+                    "{0}\n\nProgID：{1}\n关联扩展名：{2} 种\n右键菜单：{3}\n打开命令：{4}\n\n"
                     + "命令行等价操作：\n  PS-text.exe --register\n  PS-text.exe --unregister\n  PS-text.exe --assoc-status",
                     stateText,
                     service.ProgId,
                     service.SupportedExtensionCount,
+                    service.HasContextMenu ? "已添加“用 PS-text 编辑 / 打印”" : "未添加",
                     service.RegisteredCommandText ?? "（无）");
 
                 _dialogService.ShowInformation(text, "文件关联状态");

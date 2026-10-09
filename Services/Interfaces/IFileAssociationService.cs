@@ -59,6 +59,9 @@ namespace PSText.Services.Interfaces
         /// <summary>已登记的打开命令（未注册时为 null）。用于诊断。</summary>
         string RegisteredCommandText { get; }
 
+        /// <summary>右键菜单动词（“用 PS-text 编辑 / 打印”）是否已登记。</summary>
+        bool HasContextMenu { get; }
+
         /// <summary>要登记的 ProgID（界面提示里会用到）。</summary>
         string ProgId { get; }
 

@@ -118,6 +118,8 @@ namespace PSText
                 CheckAnnotationEndToEnd(imageService, pngPath, ref checks, ref failures, log);
                 CheckBatchPipeline(imageService, tempRoot, ref checks, ref failures, log);
                 CheckSystemIntegration(pngPath, tempRoot, ref checks, ref failures, log);
+                CheckMosaicAnnotation(imageService, pngPath, ref checks, ref failures, log);
+                CheckAnnotationResize(imageService, pngPath, ref checks, ref failures, log);
                 log.AppendLine();
             }
             catch (Exception ex)
@@ -6885,6 +6887,46 @@ namespace PSText
             {
                 log.AppendLine("  OK   无界面模式不会同时打开图片");
             }
+
+            // --print：右键菜单的“用 PS-text 打印”靠它把文件带进来
+            checks++;
+            CommandLineOptions print = CommandLineOptions.Parse(new[] { "--print", pngPath });
+
+            if (print.Mode != StartupMode.OpenWindow
+                || !print.PrintAfterLoad
+                || !string.Equals(print.ImagePath, pngPath, StringComparison.OrdinalIgnoreCase))
+            {
+                failures++;
+                log.AppendLine(string.Format(
+                    "  FAIL --print 应保留正常启动模式并标记打开后打印（模式={0}，打印={1}，文件={2}）",
+                    print.Mode, print.PrintAfterLoad, print.ImagePath ?? "null"));
+            }
+            else
+            {
+                log.AppendLine("  OK   --print 正常打开图片并标记「打开后进打印预览」");
+            }
+
+            checks++;
+            if (CommandLineOptions.Parse(new[] { pngPath }).PrintAfterLoad)
+            {
+                failures++;
+                log.AppendLine("  FAIL 不带 --print 时不应触发打印");
+            }
+            else
+            {
+                log.AppendLine("  OK   不带 --print 时不会触发打印（避免误打印）");
+            }
+
+            checks++;
+            if (CommandLineOptions.Parse(new[] { pngPath, "--register" }).PrintAfterLoad)
+            {
+                failures++;
+                log.AppendLine("  FAIL 无界面模式下不应保留打印标记");
+            }
+            else
+            {
+                log.AppendLine("  OK   无界面模式不会保留打印标记");
+            }
         }
 
         /// <summary>
@@ -7020,12 +7062,12 @@ namespace PSText
 
             if (!canWrite)
             {
-                log.AppendLine("  SKIP 本机禁止本进程写注册表，跳过后面的关联写入流程（约 18 项断言）");
+                log.AppendLine("  SKIP 本机禁止本进程写注册表，跳过关联写入流程（打开方式 + 右键菜单）");
                 log.AppendLine("       原因：" + writeError);
                 log.AppendLine("       这是环境策略，不是程序缺陷：本机工具层会拦下可执行文件对注册表的写入");
                 log.AppendLine("       （已核实同样的键路径用受信任工具可以正常创建，且与 exe 名字无关）。");
-                log.AppendLine("       在普通 Windows 上重跑 --selftest，这 18 项会自动执行；");
-                log.AppendLine("       或直接双击 PS-text.exe --register，然后在图片上右键看“打开方式”。");
+                log.AppendLine("       在普通 Windows 上重跑 --selftest，这些断言会自动执行；");
+                log.AppendLine("       或直接运行 PS-text.exe --register，然后在图片上右键看菜单与“打开方式”。");
                 return;
             }
 
@@ -7187,6 +7229,48 @@ namespace PSText
                     log.AppendLine("  OK   注册后状态：已注册（指向当前程序）");
                 }
 
+                // ---- 右键菜单 ----
+                string shellRoot = classes + @"\SystemFileAssociations\image\shell";
+
+                checks++;
+                bool verbsOk =
+                    string.Equals(ReadRegistryString(shellRoot + @"\PSText.Edit", "MUIVerb"), "用 PS-text 编辑", StringComparison.Ordinal)
+                    && string.Equals(
+                        ReadRegistryString(shellRoot + @"\PSText.Edit\command", null),
+                        "\"" + stubExe + "\" \"%1\"",
+                        StringComparison.Ordinal)
+                    && string.Equals(ReadRegistryString(shellRoot + @"\PSText.Print", "MUIVerb"), "用 PS-text 打印", StringComparison.Ordinal)
+                    && string.Equals(
+                        ReadRegistryString(shellRoot + @"\PSText.Print\command", null),
+                        "\"" + stubExe + "\" --print \"%1\"",
+                        StringComparison.Ordinal)
+                    && service.HasContextMenu;
+
+                if (!verbsOk)
+                {
+                    failures++;
+                    log.AppendLine(string.Format(
+                        "  FAIL 右键菜单动词不完整：编辑=「{0}」打印=「{1}」HasContextMenu={2}",
+                        ReadRegistryString(shellRoot + @"\PSText.Edit\command", null),
+                        ReadRegistryString(shellRoot + @"\PSText.Print\command", null),
+                        service.HasContextMenu));
+                }
+                else
+                {
+                    log.AppendLine("  OK   右键菜单已登记（“用 PS-text 编辑” / “用 PS-text 打印”，打印带 --print 参数）");
+                }
+
+                checks++;
+                if (RegistryValueExists(shellRoot + @"\PSText.Edit", "Extended"))
+                {
+                    failures++;
+                    log.AppendLine("  FAIL 不该写 Extended —— 那会让菜单项只在按住 Shift 时出现");
+                }
+                else
+                {
+                    log.AppendLine("  OK   未写 Extended（右键菜单项平时就能看到，不必按 Shift）");
+                }
+
                 // 绿色版被移动过：另一份 exe 查询同一份注册表，必须能识别出来
                 checks++;
                 FileAssociationService moved = new FileAssociationService(otherExe, Registry.CurrentUser, testRoot);
@@ -7272,6 +7356,26 @@ namespace PSText
                 else
                 {
                     log.AppendLine("  OK   空的 OpenWithProgids 键已清理（不留空壳）");
+                }
+
+                // ---- 右键菜单也要一起清干净 ----
+                checks++;
+                if (RegistryKeyExists(shellRoot + @"\PSText.Edit")
+                    || RegistryKeyExists(shellRoot + @"\PSText.Print")
+                    || RegistryKeyExists(shellRoot)
+                    || service.HasContextMenu)
+                {
+                    failures++;
+                    log.AppendLine(string.Format(
+                        "  FAIL 注销后右键菜单有残留：编辑={0} 打印={1} shell={2} HasContextMenu={3}",
+                        RegistryKeyExists(shellRoot + @"\PSText.Edit"),
+                        RegistryKeyExists(shellRoot + @"\PSText.Print"),
+                        RegistryKeyExists(shellRoot),
+                        service.HasContextMenu));
+                }
+                else
+                {
+                    log.AppendLine("  OK   注销后右键菜单无残留（动词键与空的 shell 键都已清理）");
                 }
 
                 checks++;
@@ -7484,6 +7588,1172 @@ namespace PSText
             {
                 return false;
             }
+        }
+
+        /// <summary>
+        /// 校验遮盖类标注（马赛克 / 模糊）。
+        ///
+        /// 遮盖与其它标注的本质区别：它的内容是**底图的像素级派生**，不是几何。
+        /// 因此要额外钉住两件其它标注不存在的事：
+        ///   1. **块网格锚定在整幅图的 (0,0)** —— 否则拖动标注时所有方块会跟着"流动"；
+        ///   2. **只改矩形内的像素** —— 这是遮盖类工具的安全性底线，矩形外被改了就是事故。
+        /// </summary>
+        private static void CheckMosaicAnnotation(
+            IImageService imageService,
+            string pngPath,
+            ref int checks,
+            ref int failures,
+            StringBuilder log)
+        {
+            log.AppendLine("[34] 遮盖标注（马赛克 / 模糊）");
+
+            try
+            {
+                CheckMosaicPixelate(ref checks, ref failures, log);
+                CheckMosaicAnchor(ref checks, ref failures, log);
+                CheckMosaicBlur(ref checks, ref failures, log);
+                CheckMosaicProvider(ref checks, ref failures, log);
+                CheckMosaicEndToEnd(imageService, pngPath, ref checks, ref failures, log);
+            }
+            catch (Exception ex)
+            {
+                failures++;
+                log.AppendLine("  FAIL 遮盖标注测试异常: " + ex.GetType().Name + " " + ex.Message);
+            }
+
+            log.AppendLine();
+        }
+
+        /// <summary>块平均本身：常值解 + 块值确实等于该块的平均值。</summary>
+        private static void CheckMosaicPixelate(ref int checks, ref int failures, StringBuilder log)
+        {
+            // ---- 常值解：纯色输入必须原样还原（含奇数块，四舍五入不能掉色阶）----
+            PixelBuffer solid = CreateSolidBuffer(120, 90, 40, 80, 160);
+
+            int originX;
+            int originY;
+            PixelBuffer covered = MosaicFilter.PixelateRegion(
+                solid, 7, 5, 61, 43, 9, out originX, out originY, System.Threading.CancellationToken.None);
+
+            checks++;
+            if (covered == null)
+            {
+                failures++;
+                log.AppendLine("  FAIL 纯色图上的块平均不该返回空");
+            }
+            else
+            {
+                byte[] pixels = covered.GetPixels();
+                int mismatched = 0;
+
+                for (int i = 0; i < pixels.Length; i += 4)
+                {
+                    if (pixels[i] != 160 || pixels[i + 1] != 80 || pixels[i + 2] != 40 || pixels[i + 3] != 255)
+                    {
+                        mismatched++;
+                    }
+                }
+
+                if (mismatched > 0)
+                {
+                    failures++;
+                    log.AppendLine(string.Format("  FAIL 纯色图块平均后有 {0} 个像素偏色（常值解不成立）", mismatched));
+                }
+                else
+                {
+                    log.AppendLine(string.Format("  OK   纯色图块平均逐像素等于原色（{0}×{1}）", covered.Width, covered.Height));
+                }
+            }
+
+            // ---- 块值必须等于该块内像素的算术平均 ----
+            PixelBuffer ramp = CreateHorizontalRamp(160, 80);
+            const int block = 16;
+
+            int rampOriginX;
+            int rampOriginY;
+            PixelBuffer rampCovered = MosaicFilter.PixelateRegion(
+                ramp, 20, 16, 80, 48, block, out rampOriginX, out rampOriginY, System.Threading.CancellationToken.None);
+
+            checks++;
+            if (rampCovered == null)
+            {
+                failures++;
+                log.AppendLine("  FAIL 渐变图上的块平均不该返回空");
+            }
+            else
+            {
+                int[] wrongBlocks = new int[0];
+                int wrong = 0;
+                string detail = null;
+
+                for (int blockY = rampOriginY; blockY + block <= rampOriginY + rampCovered.Height; blockY += block)
+                {
+                    for (int blockX = rampOriginX; blockX + block <= rampOriginX + rampCovered.Width; blockX += block)
+                    {
+                        // 期望值 = 该块在原图上的通道平均
+                        // 注意用**蓝**通道：CreateHorizontalRamp 的渐变在蓝通道（红通道恒为 128），
+                        // 拿红通道比等于在比常量，断言会变成空转。
+                        int expectedBlue = MosaicFilter.AverageChannel(ramp, blockX, blockY, block, block, 0);
+                        byte[] sample = CopyPixel(rampCovered, blockX - rampOriginX, blockY - rampOriginY);
+
+                        if (sample == null || sample[0] != (byte)expectedBlue)
+                        {
+                            wrong++;
+
+                            if (detail == null)
+                            {
+                                detail = string.Format(
+                                    "块 ({0},{1}) 期望 B={2}，实际 B={3}",
+                                    blockX, blockY, expectedBlue, sample == null ? -1 : sample[0]);
+                            }
+                        }
+                    }
+                }
+
+                if (wrong > 0)
+                {
+                    failures++;
+                    log.AppendLine(string.Format("  FAIL 有 {0} 个块的值不等于该块平均（首个：{1}）", wrong, detail));
+                }
+                else
+                {
+                    log.AppendLine("  OK   每个块的值都等于该块在原图上的算术平均");
+                }
+
+                // 块内必须完全均匀 —— 否则就不是"方块"而是"糊"
+                checks++;
+                int unevenBlocks = 0;
+
+                for (int blockY = rampOriginY; blockY + block <= rampOriginY + rampCovered.Height; blockY += block)
+                {
+                    byte[] first = CopyPixel(rampCovered, 0, blockY - rampOriginY);
+
+                    for (int inner = 1; inner < block; inner++)
+                    {
+                        byte[] other = CopyPixel(rampCovered, 0, blockY - rampOriginY + inner);
+
+                        if (first == null || other == null || first[0] != other[0])
+                        {
+                            unevenBlocks++;
+                        }
+                    }
+                }
+
+                if (unevenBlocks > 0)
+                {
+                    failures++;
+                    log.AppendLine(string.Format("  FAIL 有 {0} 处块内像素不一致", unevenBlocks));
+                }
+                else
+                {
+                    log.AppendLine("  OK   块内像素完全一致（硬边方块，不是糊）");
+                }
+            }
+        }
+
+        /// <summary>
+        /// 块网格锚定在整幅图的 (0,0)。
+        ///
+        /// 这是"拖动标注时马赛克不流动"的全部依据：区域起点不同，但只要求得的
+        /// 素材起点相同，同一图像坐标处的块值就必然相同。
+        /// </summary>
+        private static void CheckMosaicAnchor(ref int checks, ref int failures, StringBuilder log)
+        {
+            PixelBuffer ramp = CreateHorizontalRamp(240, 160);
+            const int block = 10;
+
+            int ax;
+            int ay;
+            int bx;
+            int by;
+
+            MosaicFilter.PixelateRegion(ramp, 103, 57, 60, 40, block, out ax, out ay, System.Threading.CancellationToken.None);
+            MosaicFilter.PixelateRegion(ramp, 107, 59, 60, 40, block, out bx, out by, System.Threading.CancellationToken.None);
+
+            checks++;
+            if (ax % block != 0 || ay % block != 0 || bx % block != 0 || by % block != 0)
+            {
+                failures++;
+                log.AppendLine(string.Format(
+                    "  FAIL 素材起点必须对齐到块边界（否则相位会随标注移动而漂移）：({0},{1}) / ({2},{3})",
+                    ax, ay, bx, by));
+            }
+            else
+            {
+                log.AppendLine(string.Format("  OK   素材起点对齐到块边界（{0}px 网格）：({1},{2}) / ({3},{4})", block, ax, ay, bx, by));
+            }
+
+            // 两次请求落在同一个块网格内 ⇒ 求得的起点必须相同
+            checks++;
+            if (ax != bx || ay != by)
+            {
+                failures++;
+                log.AppendLine(string.Format(
+                    "  FAIL 同一块网格内的两次请求应求得同一起点，实际 ({0},{1}) vs ({2},{3})", ax, ay, bx, by));
+            }
+            else
+            {
+                log.AppendLine("  OK   同一块网格内的不同起点求出同一起点（相位不随标注位移改变）");
+            }
+
+            // 更直接的行为断言：同一图像坐标处的块值，两次请求必须相同
+            int cx;
+            int cy;
+            int dx;
+            int dy;
+            PixelBuffer first = MosaicFilter.PixelateRegion(ramp, 100, 50, 60, 40, block, out cx, out cy, System.Threading.CancellationToken.None);
+            PixelBuffer second = MosaicFilter.PixelateRegion(ramp, 106, 54, 60, 40, block, out dx, out dy, System.Threading.CancellationToken.None);
+
+            checks++;
+            string mismatch = null;
+            int sampled = 0;
+
+            if (first == null || second == null)
+            {
+                failures++;
+                log.AppendLine("  FAIL 两次请求都应返回结果");
+            }
+            else
+            {
+                // 只在两次结果**都覆盖**的图像坐标上取样。
+                // first 覆盖 (100..160)×(50..90)，second 覆盖 (100..170)×(50..100)，
+                // 交集是 (100..160)×(50..90)，这里取靠内的一圈。
+                for (int imageY = 60; imageY <= 80 && mismatch == null; imageY += block)
+                {
+                    for (int imageX = 110; imageX <= 150; imageX += block)
+                    {
+                        byte[] left = CopyPixel(first, imageX - cx, imageY - cy);
+                        byte[] right = CopyPixel(second, imageX - dx, imageY - dy);
+
+                        if (left == null || right == null)
+                        {
+                            mismatch = string.Format("({0},{1}) 超出某一次结果的范围", imageX, imageY);
+                            break;
+                        }
+
+                        sampled++;
+
+                        if (left[0] != right[0] || left[1] != right[1] || left[2] != right[2])
+                        {
+                            mismatch = string.Format("({0},{1}) 块值不同", imageX, imageY);
+                            break;
+                        }
+                    }
+                }
+
+                if (mismatch != null)
+                {
+                    failures++;
+                    log.AppendLine("  FAIL 同一图像坐标的块值随请求起点改变（拖动会看到马赛克流动）：" + mismatch);
+                }
+                else if (sampled < 4)
+                {
+                    failures++;
+                    log.AppendLine(string.Format("  FAIL 取样点太少（{0} 个），这条断言没有说服力", sampled));
+                }
+                else
+                {
+                    log.AppendLine(string.Format(
+                        "  OK   同一图像坐标的块值与请求起点无关（抽样 {0} 个块，拖动时马赛克不会流动）", sampled));
+                }
+            }
+        }
+
+        /// <summary>区域内模糊：尺寸可控、纯色不变（边界外扩确实生效）。</summary>
+        private static void CheckMosaicBlur(ref int checks, ref int failures, StringBuilder log)
+        {
+            PixelBuffer solid = CreateSolidBuffer(200, 140, 90, 140, 200);
+
+            int originX;
+            int originY;
+            PixelBuffer blurred = MosaicFilter.BlurRegion(
+                solid, 40, 30, 60, 40, 8.0, out originX, out originY, System.Threading.CancellationToken.None);
+
+            checks++;
+            if (blurred == null)
+            {
+                failures++;
+                log.AppendLine("  FAIL 区域内模糊不该返回空");
+            }
+            else if (blurred.Width != 60 || blurred.Height != 40 || originX != 40 || originY != 30)
+            {
+                failures++;
+                log.AppendLine(string.Format(
+                    "  FAIL 模糊结果应正好是请求矩形（期望 60×40 @(40,30)，实际 {0}×{1} @({2},{3})）",
+                    blurred.Width, blurred.Height, originX, originY));
+            }
+            else
+            {
+                byte[] pixels = blurred.GetPixels();
+                int maxDelta = 0;
+
+                for (int i = 0; i < pixels.Length; i += 4)
+                {
+                    maxDelta = Math.Max(maxDelta, Math.Abs(pixels[i] - 200));
+                    maxDelta = Math.Max(maxDelta, Math.Abs(pixels[i + 1] - 140));
+                    maxDelta = Math.Max(maxDelta, Math.Abs(pixels[i + 2] - 90));
+                }
+
+                if (maxDelta > 1)
+                {
+                    failures++;
+                    log.AppendLine(string.Format("  FAIL 纯色图模糊后应保持不变，最大偏差 {0}", maxDelta));
+                }
+                else
+                {
+                    log.AppendLine(string.Format("  OK   区域模糊尺寸与起点正确，纯色图最大偏差 {0}", maxDelta));
+                }
+            }
+
+            // 边界外扩的意义：紧贴图像左上角的区域，若不做外扩，镜像补位会把边界颜色污染进来
+            checks++;
+            int edgeOriginX;
+            int edgeOriginY;
+            PixelBuffer ramp = CreateHorizontalRamp(120, 80);
+            PixelBuffer edgeBlur = MosaicFilter.BlurRegion(
+                ramp, 0, 0, 40, 30, 10.0, out edgeOriginX, out edgeOriginY, System.Threading.CancellationToken.None);
+
+            // 渐变图左上角模糊后，最左列的值必须落在"原值 ~ 右侧邻居"之间，而不是被镜像成更亮的颜色
+            byte[] cornerTop = edgeBlur == null ? null : CopyPixel(edgeBlur, 0, 0);
+            byte[] cornerBelow = edgeBlur == null ? null : CopyPixel(edgeBlur, 0, 12);
+
+            if (edgeBlur == null || cornerTop == null || cornerBelow == null)
+            {
+                failures++;
+                log.AppendLine("  FAIL 贴边区域的模糊不该返回空");
+            }
+            else
+            {
+                byte[] rampLeft = CopyPixel(ramp, 0, 20);
+                byte[] rampRight = CopyPixel(ramp, 39, 20);
+
+                int minExpected = Math.Min(rampLeft[0], rampRight[0]);
+                int maxExpected = Math.Max(rampLeft[0], rampRight[0]);
+
+                if (cornerTop[0] < minExpected - 2 || cornerTop[0] > maxExpected + 2)
+                {
+                    failures++;
+                    log.AppendLine(string.Format(
+                        "  FAIL 贴边模糊的结果超出行内取值范围（B={0} 不在 {1}~{2}），边界外扩可能没生效",
+                        cornerTop[0], minExpected, maxExpected));
+                }
+                else
+                {
+                    log.AppendLine(string.Format(
+                        "  OK   贴边区域模糊未越界（B={0}，行内范围 {1}~{2}）", cornerTop[0], minExpected, maxExpected));
+                }
+            }
+        }
+
+        /// <summary>素材提供者：ImageBrush 必须 1:1 映射（Viewbox 与 Viewport 同矩形）。</summary>
+        private static void CheckMosaicProvider(ref int checks, ref int failures, StringBuilder log)
+        {
+            AnnotationObject item = new AnnotationObject
+            {
+                Kind = AnnotationKind.Mosaic,
+                X1 = 30,
+                Y1 = 20,
+                X2 = 110,
+                Y2 = 80,
+                CoverSize = 8,
+                MosaicStyle = MosaicStyle.Pixelate
+            };
+
+            // 源不可用（例如还没打开图片）
+            MosaicSourceProvider empty = new MosaicSourceProvider(() => null);
+
+            checks++;
+            if (empty.CreateCoverBrush(item) != null)
+            {
+                failures++;
+                log.AppendLine("  FAIL 源不可用时不应生成素材");
+            }
+            else
+            {
+                log.AppendLine("  OK   源不可用时返回 null（由构建器退化为占位填充，不会让标注凭空消失）");
+            }
+
+            // 源可用
+            PixelBuffer ramp = CreateHorizontalRamp(200, 120);
+            MosaicSourceProvider provider = new MosaicSourceProvider(() => ramp);
+
+            object brush = provider.CreateCoverBrush(item);
+
+            checks++;
+            if (!(brush is ImageBrush))
+            {
+                failures++;
+                log.AppendLine("  FAIL 遮盖素材应当是 ImageBrush，实际 " + (brush == null ? "null" : brush.GetType().Name));
+            }
+            else
+            {
+                ImageBrush image = (ImageBrush)brush;
+
+                // Viewbox 与 Viewport 必须完全相同 —— 这是"不二次采样、方块不被糊掉"的保证
+                if (!image.Viewbox.Equals(image.Viewport) || image.Stretch != Stretch.Fill)
+                {
+                    failures++;
+                    log.AppendLine(string.Format(
+                        "  FAIL 素材必须 1:1 映射（Viewbox {0} / Viewport {1} / Stretch {2}）",
+                        image.Viewbox, image.Viewport, image.Stretch));
+                }
+                else
+                {
+                    log.AppendLine(string.Format(
+                        "  OK   素材是 1:1 映射的 ImageBrush（矩形 {0:0}×{1:0}）", image.Viewbox.Width, image.Viewbox.Height));
+                }
+            }
+
+            // 没有提供者时，构建器要给占位而不是空 —— 否则标注会"消失"
+            checks++;
+            AnnotationVisual visual = AnnotationVisualBuilder.Build(item, null);
+
+            if (visual.Geometry == null || visual.Fill == null)
+            {
+                failures++;
+                log.AppendLine("  FAIL 素材缺失时应当退化占位填充，而不是什么都不画");
+            }
+            else
+            {
+                log.AppendLine("  OK   素材缺失时退化为占位填充（标注仍然可见）");
+            }
+        }
+
+        /// <summary>端到端：只改矩形内像素、块状可见、叠加层真的拿到了底图素材、可撤销。</summary>
+        private static void CheckMosaicEndToEnd(
+            IImageService imageService,
+            string pngPath,
+            ref int checks,
+            ref int failures,
+            StringBuilder log)
+        {
+            // ---- 渲染层 ----
+            PixelBuffer ramp = CreateHorizontalRamp(240, 160);
+            byte[] original = ramp.GetPixelsCopy();
+
+            AnnotationObject item = new AnnotationObject
+            {
+                Kind = AnnotationKind.Mosaic,
+                X1 = 60,
+                Y1 = 40,
+                X2 = 160,
+                Y2 = 120,
+                CoverSize = 10,
+                MosaicStyle = MosaicStyle.Pixelate
+            };
+
+            List<AnnotationObject> objects = new List<AnnotationObject> { item };
+            MosaicSourceProvider provider = new MosaicSourceProvider(() => ramp);
+
+            PixelBuffer composited = AnnotationRenderer.Render(ramp, objects, provider);
+
+            checks++;
+            if (ReferenceEquals(composited, ramp))
+            {
+                failures++;
+                log.AppendLine("  FAIL 有遮盖标注时渲染结果不应等于原图");
+            }
+            else
+            {
+                log.AppendLine("  OK   渲染产生了新的像素缓冲");
+            }
+
+            // 矩形外的像素**逐字节**不变：遮盖工具的安全性底线
+            checks++;
+            byte[] result = composited.GetPixels();
+            int outsideChanged = 0;
+            int insideChanged = 0;
+
+            for (int y = 0; y < composited.Height; y++)
+            {
+                for (int x = 0; x < composited.Width; x++)
+                {
+                    int index = (y * composited.Width + x) * 4;
+                    bool changed = result[index] != original[index]
+                                   || result[index + 1] != original[index + 1]
+                                   || result[index + 2] != original[index + 2];
+
+                    bool inside = x >= 60 && x < 160 && y >= 40 && y < 120;
+
+                    if (!changed)
+                    {
+                        continue;
+                    }
+
+                    if (inside)
+                    {
+                        insideChanged++;
+                    }
+                    else
+                    {
+                        outsideChanged++;
+                    }
+                }
+            }
+
+            if (outsideChanged > 0)
+            {
+                failures++;
+                log.AppendLine(string.Format("  FAIL 遮盖标注改到了矩形外的 {0} 个像素（安全性底线）", outsideChanged));
+            }
+            else
+            {
+                log.AppendLine("  OK   矩形外的像素逐字节不变（遮盖只影响自己那块）");
+            }
+
+            checks++;
+            if (insideChanged == 0)
+            {
+                failures++;
+                log.AppendLine("  FAIL 矩形内的像素没有被遮盖");
+            }
+            else
+            {
+                log.AppendLine(string.Format("  OK   矩形内有 {0} 个像素被遮盖", insideChanged));
+            }
+
+            // 块状结构：块内一致、相邻块不同
+            checks++;
+            byte[] firstBlock = CopyPixel(composited, 60, 40);
+            byte[] sameBlock = CopyPixel(composited, 65, 45);
+            byte[] nextBlock = CopyPixel(composited, 70, 40);
+
+            if (firstBlock == null || sameBlock == null || nextBlock == null)
+            {
+                failures++;
+                log.AppendLine("  FAIL 取样点越界");
+            }
+            else if (firstBlock[0] != sameBlock[0])
+            {
+                failures++;
+                log.AppendLine(string.Format(
+                    "  FAIL 块内像素应完全一致（B={0} vs {1}）—— 说明方块被二次采样糊掉了",
+                    firstBlock[0], sameBlock[0]));
+            }
+            else if (firstBlock[0] == nextBlock[0])
+            {
+                failures++;
+                log.AppendLine(string.Format(
+                    "  FAIL 相邻块的值相同（B={0}）—— 遮盖区域没有呈现块状", firstBlock[0]));
+            }
+            else
+            {
+                log.AppendLine(string.Format(
+                    "  OK   遮盖区域呈块状（块内 B={0} 一致，相邻块 B={1} 不同）", firstBlock[0], nextBlock[0]));
+            }
+
+            // ---- ViewModel 层 ----
+            MainViewModel viewModel = new MainViewModel(
+                imageService,
+                new NullDialogService(),
+                new ImmediateDispatcherService());
+
+            viewModel.LoadFromPathAsync(pngPath).GetAwaiter().GetResult();
+            WaitForIdle(viewModel);
+
+            viewModel.AnnotationToolIndex = (int)AnnotationKind.Mosaic;
+            viewModel.AnnotationCoverSize = 16.0;
+            viewModel.BeginAnnotationCommand.Execute(null);
+            viewModel.BeginAnnotationGesture(40, 30);
+            viewModel.UpdateAnnotationGesture(140, 110);
+            viewModel.EndAnnotationGesture();
+
+            checks++;
+            if (viewModel.AnnotationCount != 1)
+            {
+                failures++;
+                log.AppendLine(string.Format("  FAIL 拖拽后应产生 1 个遮盖标注，实际 {0} 个", viewModel.AnnotationCount));
+            }
+            else
+            {
+                AnnotationObject created = viewModel.Annotations[0].Source;
+
+                if (created.Kind != AnnotationKind.Mosaic || Math.Abs(created.CoverSize - 16.0) > 1e-9)
+                {
+                    failures++;
+                    log.AppendLine(string.Format(
+                        "  FAIL 新建的遮盖标注参数不对（Kind={0}，强度={1}）", created.Kind, created.CoverSize));
+                }
+                else
+                {
+                    log.AppendLine("  OK   拖拽创建的遮盖标注带上了当前强度参数（16）");
+                }
+            }
+
+            // 叠加层必须真的拿到了底图素材 —— 这是"预览所见即所得"的前提
+            checks++;
+            if (viewModel.Annotations.Count == 0 || !(viewModel.Annotations[0].FillBrush is ImageBrush))
+            {
+                failures++;
+                log.AppendLine("  FAIL 叠加层的遮盖笔刷不是 ImageBrush（没取到底图素材）");
+            }
+            else
+            {
+                log.AppendLine("  OK   叠加层的遮盖笔刷确实取自底图（ImageBrush）");
+            }
+
+            // 撤销
+            checks++;
+            viewModel.UndoCommand.Execute(null);
+            WaitForIdle(viewModel);
+
+            if (viewModel.AnnotationCount != 0)
+            {
+                failures++;
+                log.AppendLine(string.Format("  FAIL 撤销后遮盖标注应消失，实际还剩 {0} 个", viewModel.AnnotationCount));
+            }
+            else
+            {
+                log.AppendLine("  OK   撤销后遮盖标注被移除（对象列表快照历史生效）");
+            }
+        }
+
+        /// <summary>
+        /// 校验标注的八向缩放手柄。
+        ///
+        /// 缩放逻辑全是"边界与钳制"——不允许翻转、最小尺寸、保持宽高比、以中心为基准，
+        /// 四者叠在一起分支很多，所以核心计算做成了纯函数（<see cref="AnnotationResizeCalculator"/>），
+        /// 这里逐条钉死；VM 层则验证"手柄优先于拖动"这个最容易做错的交互。
+        /// </summary>
+        private static void CheckAnnotationResize(
+            IImageService imageService,
+            string pngPath,
+            ref int checks,
+            ref int failures,
+            StringBuilder log)
+        {
+            log.AppendLine("[35] 标注缩放手柄");
+
+            try
+            {
+                CheckResizeCalculator(ref checks, ref failures, log);
+                CheckAnnotationResizeEndToEnd(imageService, pngPath, ref checks, ref failures, log);
+            }
+            catch (Exception ex)
+            {
+                failures++;
+                log.AppendLine("  FAIL 缩放手柄测试异常: " + ex.GetType().Name + " " + ex.Message);
+            }
+
+            log.AppendLine();
+        }
+
+        /// <summary>纯函数部分：每个手柄的方向、钳制、宽高比、中心基准。</summary>
+        private static void CheckResizeCalculator(ref int checks, ref int failures, StringBuilder log)
+        {
+            double left;
+            double top;
+            double right;
+            double bottom;
+
+            // ---- 拖右下角：左上角必须一动不动 ----
+            checks++;
+            bool ok = AnnotationResizeCalculator.TryComputeBounds(
+                20, 30, 120, 90, AnnotationHandle.BottomRight, 200, 150,
+                false, false, out left, out top, out right, out bottom);
+
+            if (!ok || Math.Abs(left - 20) > 1e-9 || Math.Abs(top - 30) > 1e-9
+                || Math.Abs(right - 200) > 1e-9 || Math.Abs(bottom - 150) > 1e-9)
+            {
+                failures++;
+                log.AppendLine(string.Format("  FAIL 拖右下角应只改右上/下边界，实际 ({0},{1})-({2},{3})", left, top, right, bottom));
+            }
+            else
+            {
+                log.AppendLine("  OK   拖右下角：左上角固定，只改宽高");
+            }
+
+            // ---- 拖左上角：右下角固定 ----
+            checks++;
+            ok = AnnotationResizeCalculator.TryComputeBounds(
+                20, 30, 120, 90, AnnotationHandle.TopLeft, -10, 5,
+                false, false, out left, out top, out right, out bottom);
+
+            if (!ok || Math.Abs(right - 120) > 1e-9 || Math.Abs(bottom - 90) > 1e-9
+                || Math.Abs(left + 10) > 1e-9 || Math.Abs(top - 5) > 1e-9)
+            {
+                failures++;
+                log.AppendLine(string.Format("  FAIL 拖左上角应只改左上边界，实际 ({0},{1})-({2},{3})", left, top, right, bottom));
+            }
+            else
+            {
+                log.AppendLine("  OK   拖左上角：右下角固定，只改宽高");
+            }
+
+            // ---- 拖边中点：只改一个方向 ----
+            checks++;
+            ok = AnnotationResizeCalculator.TryComputeBounds(
+                20, 30, 120, 90, AnnotationHandle.Right, 300, 999,
+                false, false, out left, out top, out right, out bottom);
+
+            if (!ok || Math.Abs(left - 20) > 1e-9 || Math.Abs(top - 30) > 1e-9
+                || Math.Abs(right - 300) > 1e-9 || Math.Abs(bottom - 90) > 1e-9)
+            {
+                failures++;
+                log.AppendLine(string.Format("  FAIL 拖右边中点应只改右边界，实际 ({0},{1})-({2},{3})", left, top, right, bottom));
+            }
+            else
+            {
+                log.AppendLine("  OK   拖边中点只改一个方向（纵向不受指针影响）");
+            }
+
+            // ---- 不允许翻转：拖过头时钳制在最小尺寸 ----
+            checks++;
+            ok = AnnotationResizeCalculator.TryComputeBounds(
+                20, 30, 120, 90, AnnotationHandle.BottomRight, 5, 5,
+                false, false, out left, out top, out right, out bottom);
+
+            double size = AnnotationResizeCalculator.MinimumSize;
+
+            if (!ok || right - left < size - 1e-9 || bottom - top < size - 1e-9
+                || right <= left || bottom <= top)
+            {
+                failures++;
+                log.AppendLine(string.Format(
+                    "  FAIL 拖过头时应钳制在最小尺寸而不是翻转，实际 ({0},{1})-({2},{3})", left, top, right, bottom));
+            }
+            else
+            {
+                log.AppendLine(string.Format(
+                    "  OK   拖过头不会翻转（钳制在最小尺寸 {0:0.#}，左上角仍固定）", right - left));
+            }
+
+            // ---- 保持宽高比 ----
+            checks++;
+            ok = AnnotationResizeCalculator.TryComputeBounds(
+                20, 30, 120, 90, AnnotationHandle.BottomRight, 300, 100,
+                true, false, out left, out top, out right, out bottom);
+
+            double originalAspect = 100.0 / 60.0;
+            double newAspect = (right - left) / (bottom - top);
+
+            if (!ok || Math.Abs(newAspect - originalAspect) > 1e-6)
+            {
+                failures++;
+                log.AppendLine(string.Format(
+                    "  FAIL 保持宽高比失效：原始 {0:0.####}，结果 {1:0.####}", originalAspect, newAspect));
+            }
+            else
+            {
+                log.AppendLine(string.Format(
+                    "  OK   Shift 保持宽高比（{0:0.###} → {1:0.###}，尺寸 {2:0}×{3:0}）",
+                    originalAspect, newAspect, right - left, bottom - top));
+            }
+
+            // ---- 以中心为基准 ----
+            checks++;
+            ok = AnnotationResizeCalculator.TryComputeBounds(
+                20, 30, 120, 90, AnnotationHandle.Right, 200, 60,
+                false, true, out left, out top, out right, out bottom);
+
+            double centerBefore = (20 + 120) / 2.0;
+            double centerAfter = (left + right) / 2.0;
+
+            if (!ok || Math.Abs(centerAfter - centerBefore) > 1e-9 || Math.Abs(top - 30) > 1e-9 || Math.Abs(bottom - 90) > 1e-9)
+            {
+                failures++;
+                log.AppendLine(string.Format(
+                    "  FAIL Alt 应以中心为基准：中心 {0:0.#} → {1:0.#}", centerBefore, centerAfter));
+            }
+            else
+            {
+                log.AppendLine(string.Format("  OK   Alt 以中心为基准（中心恒为 {0:0.#}，左右对称变化）", centerAfter));
+            }
+
+            // ---- 手柄位置 ----
+            checks++;
+            double[] expected = { 0, 0, 50, 0, 100, 0, 100, 25, 100, 50, 50, 50, 0, 50, 0, 25 };
+            AnnotationHandle[] handles = AnnotationResizeCalculator.AllHandles();
+            bool pointsOk = handles.Length == 8;
+
+            for (int i = 0; i < handles.Length && pointsOk; i++)
+            {
+                double x;
+                double y;
+                AnnotationResizeCalculator.GetHandlePoint(handles[i], 0, 0, 100, 50, out x, out y);
+
+                if (Math.Abs(x - expected[i * 2]) > 1e-9 || Math.Abs(y - expected[i * 2 + 1]) > 1e-9)
+                {
+                    pointsOk = false;
+                    log.AppendLine(string.Format(
+                        "  FAIL 手柄 {0} 位置应为 ({1},{2})，实际 ({3},{4})",
+                        handles[i], expected[i * 2], expected[i * 2 + 1], x, y));
+                }
+            }
+
+            if (!pointsOk)
+            {
+                failures++;
+            }
+            else
+            {
+                log.AppendLine("  OK   八个手柄位置正确（四角 + 四边中点）");
+            }
+
+            // ---- 光标名 ----
+            checks++;
+            bool cursorsOk =
+                AnnotationResizeCalculator.GetCursorName(AnnotationHandle.TopLeft) == "SizeNWSE"
+                && AnnotationResizeCalculator.GetCursorName(AnnotationHandle.BottomRight) == "SizeNWSE"
+                && AnnotationResizeCalculator.GetCursorName(AnnotationHandle.TopRight) == "SizeNESW"
+                && AnnotationResizeCalculator.GetCursorName(AnnotationHandle.BottomLeft) == "SizeNESW"
+                && AnnotationResizeCalculator.GetCursorName(AnnotationHandle.Top) == "SizeNS"
+                && AnnotationResizeCalculator.GetCursorName(AnnotationHandle.Left) == "SizeWE"
+                && AnnotationResizeCalculator.GetCursorName(AnnotationHandle.None) == null;
+
+            if (!cursorsOk)
+            {
+                failures++;
+                log.AppendLine("  FAIL 手柄的光标名映射不对");
+            }
+            else
+            {
+                log.AppendLine("  OK   八个手柄的光标名映射正确（四个斜向 + 两个横竖 + 无边）");
+            }
+
+            // ---- 非法输入不能崩 ----
+            checks++;
+            bool noneSafe = !AnnotationResizeCalculator.TryComputeBounds(
+                0, 0, 10, 10, AnnotationHandle.None, 5, 5, false, false, out left, out top, out right, out bottom);
+            bool nanSafe = !AnnotationResizeCalculator.TryComputeBounds(
+                0, 0, 10, 10, AnnotationHandle.BottomRight, double.NaN, 5, false, false, out left, out top, out right, out bottom);
+
+            if (!noneSafe || !nanSafe)
+            {
+                failures++;
+                log.AppendLine("  FAIL None 手柄与 NaN 指针都应安全返回 false");
+            }
+            else
+            {
+                log.AppendLine("  OK   None 手柄与 NaN 指针安全返回 false（调用方保持原样）");
+            }
+
+            // ---- 抓取边距必须**按类型**取 ----
+            //
+            // 曾经统一写成 max(线宽, 字号*0.6) + 4，而 FontSize 对所有标注都有默认值 28，
+            // 于是一个 4px 粗的矩形也带了 20 多像素的抓取边距：在它旁边点一下会被判成
+            // "选中并拖动"，而不是"在空白处新建标注"。这个缺陷是 [35] 的端到端用例抓出来的。
+            checks++;
+            AnnotationObject thinRectangle = new AnnotationObject
+            {
+                Kind = AnnotationKind.Rectangle,
+                X1 = 0,
+                Y1 = 0,
+                X2 = 100,
+                Y2 = 50,
+                StrokeWidth = 4.0,
+                FontSize = 28.0
+            };
+
+            AnnotationObject textLabel = new AnnotationObject
+            {
+                Kind = AnnotationKind.Text,
+                X1 = 0,
+                Y1 = 0,
+                X2 = 1,
+                Y2 = 1,
+                StrokeWidth = 4.0,
+                FontSize = 28.0
+            };
+
+            double rectanglePadding = thinRectangle.Left - thinRectangle.VisualBounds.Left;
+            double textLabelPadding = textLabel.Left - textLabel.VisualBounds.Left;
+
+            if (rectanglePadding > 8.0)
+            {
+                failures++;
+                log.AppendLine(string.Format(
+                    "  FAIL 细矩形的抓取边距应按线宽取（4px 线宽应约 6px），实际 {0:0.#}px —— 会误抓旁边的点击",
+                    rectanglePadding));
+            }
+            else if (textLabelPadding < 10.0)
+            {
+                failures++;
+                log.AppendLine(string.Format(
+                    "  FAIL 文字标注的抓取边距应按字号取，实际只有 {0:0.#}px", textLabelPadding));
+            }
+            else
+            {
+                log.AppendLine(string.Format(
+                    "  OK   抓取边距按类型取：4px 线宽矩形 {0:0.#}px，28px 文字 {1:0.#}px",
+                    rectanglePadding, textLabelPadding));
+            }
+        }
+
+        /// <summary>VM 层：手柄优先于拖动、尺寸按屏幕像素折算、箭头不掉头、可撤销。</summary>
+        private static void CheckAnnotationResizeEndToEnd(
+            IImageService imageService,
+            string pngPath,
+            ref int checks,
+            ref int failures,
+            StringBuilder log)
+        {
+            MainViewModel viewModel = new MainViewModel(
+                imageService,
+                new NullDialogService(),
+                new ImmediateDispatcherService());
+
+            viewModel.LoadFromPathAsync(pngPath).GetAwaiter().GetResult();
+            WaitForIdle(viewModel);
+
+            viewModel.AnnotationToolIndex = (int)AnnotationKind.Rectangle;
+            viewModel.BeginAnnotationCommand.Execute(null);
+            viewModel.BeginAnnotationGesture(40, 30);
+            viewModel.UpdateAnnotationGesture(140, 110);
+            viewModel.EndAnnotationGesture();
+
+            checks++;
+            if (!viewModel.HasSelectedAnnotation || viewModel.AnnotationHandles.Count != 8)
+            {
+                failures++;
+                log.AppendLine(string.Format(
+                    "  FAIL 选中标注后应出现 8 个手柄，实际 {0} 个（选中={1}）",
+                    viewModel.AnnotationHandles.Count, viewModel.HasSelectedAnnotation));
+            }
+            else
+            {
+                log.AppendLine("  OK   新建标注后自动选中并出现 8 个手柄");
+            }
+
+            // ---- 手柄尺寸按屏幕像素折算：缩放不影响它看起来的大小 ----
+            checks++;
+            viewModel.ZoomFactor = 1.0;
+            double sizeAt100 = viewModel.AnnotationHandles.Count > 0 ? viewModel.AnnotationHandles[0].Size : 0.0;
+
+            viewModel.ZoomFactor = 2.0;
+            double sizeAt200 = viewModel.AnnotationHandles.Count > 0 ? viewModel.AnnotationHandles[0].Size : 0.0;
+
+            if (sizeAt100 <= 0.0 || Math.Abs(sizeAt200 * 2.0 - sizeAt100) > 0.05)
+            {
+                failures++;
+                log.AppendLine(string.Format(
+                    "  FAIL 手柄尺寸应按屏幕像素折算（100% 时 {0:0.##}，200% 时应为其一半，实际 {1:0.##}）",
+                    sizeAt100, sizeAt200));
+            }
+            else
+            {
+                log.AppendLine(string.Format(
+                    "  OK   手柄按屏幕像素保持恒定大小（100% {0:0.#}px → 200% {1:0.#}px）", sizeAt100, sizeAt200));
+            }
+
+            viewModel.ZoomFactor = 1.0;
+
+            // ---- 命中测试与光标 ----
+            checks++;
+            AnnotationHandleViewModel topLeft = FindAnnotationHandle(viewModel, AnnotationHandle.TopLeft);
+            double topLeftX = topLeft == null ? 0.0 : topLeft.Left + topLeft.Size / 2.0;
+            double topLeftY = topLeft == null ? 0.0 : topLeft.Top + topLeft.Size / 2.0;
+
+            bool hitHandle = viewModel.HitTestAnnotationHandle(topLeftX, topLeftY) == AnnotationHandle.TopLeft;
+            bool missCenter = viewModel.HitTestAnnotationHandle(90, 70) == AnnotationHandle.None;
+
+            if (!hitHandle || !missCenter)
+            {
+                failures++;
+                log.AppendLine(string.Format(
+                    "  FAIL 命中测试不符：左上角手柄={0}，标注中心={1}",
+                    viewModel.HitTestAnnotationHandle(topLeftX, topLeftY),
+                    viewModel.HitTestAnnotationHandle(90, 70)));
+            }
+            else
+            {
+                log.AppendLine("  OK   手柄中心命中、标注中心不误判为手柄");
+            }
+
+            checks++;
+            viewModel.UpdateAnnotationCursor(topLeftX, topLeftY);
+            string onHandle = viewModel.AnnotationCursorName;
+
+            viewModel.UpdateAnnotationCursor(90, 70);
+            string offHandle = viewModel.AnnotationCursorName;
+
+            if (onHandle != "SizeNWSE" || offHandle != null)
+            {
+                failures++;
+                log.AppendLine(string.Format(
+                    "  FAIL 光标提示不对：手柄上应为 SizeNWSE（实际 {0}），空白处应为空（实际 {1}）",
+                    onHandle ?? "null", offHandle ?? "null"));
+            }
+            else
+            {
+                log.AppendLine("  OK   光标提示正确（手柄上 SizeNWSE，空白处十字准星）");
+            }
+
+            // ---- 抓角缩放：手柄必须优先于"拖动标注" ----
+            AnnotationObject before = viewModel.Annotations[0].Source.Clone();
+            AnnotationHandleViewModel bottomRight = FindAnnotationHandle(viewModel, AnnotationHandle.BottomRight);
+
+            checks++;
+            if (bottomRight == null)
+            {
+                failures++;
+                log.AppendLine("  FAIL 找不到右下角手柄");
+                return;
+            }
+
+            viewModel.BeginAnnotationGesture(bottomRight.Left + bottomRight.Size / 2.0, bottomRight.Top + bottomRight.Size / 2.0);
+            viewModel.UpdateAnnotationGesture(200, 160);
+            viewModel.EndAnnotationGesture();
+
+            AnnotationObject after = viewModel.Annotations[0].Source;
+
+            if (Math.Abs(after.Left - before.Left) > 1e-6 || Math.Abs(after.Top - before.Top) > 1e-6)
+            {
+                failures++;
+                log.AppendLine(string.Format(
+                    "  FAIL 抓角缩放不该挪动左上角（{0:0.#},{1:0.#} → {2:0.#},{3:0.#}）—— 手柄可能被当成了拖动",
+                    before.Left, before.Top, after.Left, after.Top));
+            }
+            else if (Math.Abs(after.Left + after.Width - 200) > 1e-6 || Math.Abs(after.Top + after.Height - 160) > 1e-6)
+            {
+                failures++;
+                log.AppendLine(string.Format(
+                    "  FAIL 右下角应跟到指针 (200,160)，实际 ({0:0.#},{1:0.#})",
+                    after.Left + after.Width, after.Top + after.Height));
+            }
+            else
+            {
+                log.AppendLine(string.Format(
+                    "  OK   抓右下角缩放：左上角不动，尺寸 {0:0}×{1:0} → {2:0}×{3:0}",
+                    before.Width, before.Height, after.Width, after.Height));
+            }
+
+            // ---- 撤销回到原尺寸 ----
+            checks++;
+            viewModel.UndoCommand.Execute(null);
+            WaitForIdle(viewModel);
+
+            AnnotationObject restored = viewModel.Annotations[0].Source;
+
+            if (Math.Abs(restored.Width - before.Width) > 1e-6 || Math.Abs(restored.Height - before.Height) > 1e-6)
+            {
+                failures++;
+                log.AppendLine(string.Format(
+                    "  FAIL 撤销后应恢复原尺寸 {0:0}×{1:0}，实际 {2:0}×{3:0}",
+                    before.Width, before.Height, restored.Width, restored.Height));
+            }
+            else
+            {
+                log.AppendLine("  OK   撤销后恢复原尺寸（缩放是一步独立历史）");
+            }
+
+            // ---- 箭头缩放后不能掉头 ----
+            viewModel.AnnotationToolIndex = (int)AnnotationKind.Arrow;
+            viewModel.BeginAnnotationGesture(200, 150);
+            viewModel.UpdateAnnotationGesture(120, 100);
+            viewModel.EndAnnotationGesture();
+
+            int arrowIndex = viewModel.AnnotationCount - 1;
+            AnnotationObject arrow = viewModel.Annotations[arrowIndex].Source;
+
+            checks++;
+            if (arrow.Kind != AnnotationKind.Arrow || Math.Abs(arrow.X1 - 200) > 1e-6 || Math.Abs(arrow.Y1 - 150) > 1e-6)
+            {
+                failures++;
+                log.AppendLine(string.Format(
+                    "  FAIL 箭头起点应为按下点 (200,150)，实际 ({0:0.#},{1:0.#})", arrow.X1, arrow.Y1));
+            }
+            else
+            {
+                log.AppendLine("  OK   箭头创建正确（起点 = 按下点，从右下指向左上）");
+            }
+
+            // 拖左上角手柄往外拉
+            viewModel.BeginAnnotationGesture(120, 100);
+            viewModel.UpdateAnnotationGesture(60, 50);
+            viewModel.EndAnnotationGesture();
+
+            AnnotationObject resizedArrow = viewModel.Annotations[arrowIndex].Source;
+
+            checks++;
+            if (Math.Abs(resizedArrow.X1 - 200) > 1e-6 || Math.Abs(resizedArrow.Y1 - 150) > 1e-6)
+            {
+                failures++;
+                log.AppendLine(string.Format(
+                    "  FAIL 箭头缩放后方向反了（起点变成 ({0:0.#},{1:0.#})），应始终从尾指向头",
+                    resizedArrow.X1, resizedArrow.Y1));
+            }
+            else
+            {
+                log.AppendLine(string.Format(
+                    "  OK   箭头缩放不掉头（起点仍是 200,150；新终点 {0:0.#},{1:0.#}）",
+                    resizedArrow.X2, resizedArrow.Y2));
+            }
+
+            // ---- 文字：拖角改字号 ----
+            // 落点刻意选在远离箭头的空白处（箭头缩放到 (60,50)-(200,150)，
+            // 视觉包围盒还会往外扩），否则会变成"选中箭头并拖动"而不是新建文字。
+            viewModel.AnnotationToolIndex = (int)AnnotationKind.Text;
+            viewModel.AnnotationText = "缩放测试";
+            viewModel.BeginAnnotationGesture(20, 20);
+            viewModel.UpdateAnnotationGesture(21, 21);
+            viewModel.EndAnnotationGesture();
+
+            int textIndex = viewModel.AnnotationCount - 1;
+
+            checks++;
+            if (textIndex < 0 || viewModel.Annotations[textIndex].Source.Kind != AnnotationKind.Text)
+            {
+                failures++;
+                log.AppendLine(string.Format(
+                    "  FAIL 在空白处点击应新建文字标注，实际总数 {0}，末项类型 {1}",
+                    viewModel.AnnotationCount,
+                    textIndex < 0 ? "无" : viewModel.Annotations[textIndex].Source.Kind.ToString()));
+                return;
+            }
+
+            double originalFontSize = viewModel.Annotations[textIndex].Source.FontSize;
+
+            AnnotationHandleViewModel textCorner = FindAnnotationHandle(viewModel, AnnotationHandle.BottomRight);
+
+            checks++;
+            if (textCorner == null)
+            {
+                failures++;
+                log.AppendLine("  FAIL 文字标注也应有缩放手柄（用与字号成比例的虚拟盒）");
+            }
+            else
+            {
+                // 文字盒是虚拟的（与字号成比例），拖角的距离换算成字号变化
+                viewModel.BeginAnnotationGesture(textCorner.Left + textCorner.Size / 2.0, textCorner.Top + textCorner.Size / 2.0);
+                viewModel.UpdateAnnotationGesture(
+                    textCorner.Left + textCorner.Size / 2.0 + 60,
+                    textCorner.Top + textCorner.Size / 2.0 + 60);
+                viewModel.EndAnnotationGesture();
+
+                double grownFontSize = viewModel.Annotations[textIndex].Source.FontSize;
+
+                if (grownFontSize <= originalFontSize + 1.0)
+                {
+                    failures++;
+                    log.AppendLine(string.Format(
+                        "  FAIL 文字拖角应变大字号（{0:0.#} → {1:0.#}）", originalFontSize, grownFontSize));
+                }
+                else
+                {
+                    log.AppendLine(string.Format(
+                        "  OK   文字拖角改字号（{0:0.#} → {1:0.#}，位置跟随新盒左上角）",
+                        originalFontSize, grownFontSize));
+                }
+            }
+        }
+
+        private static AnnotationHandleViewModel FindAnnotationHandle(MainViewModel viewModel, AnnotationHandle handle)
+        {
+            if (viewModel == null)
+            {
+                return null;
+            }
+
+            for (int i = 0; i < viewModel.AnnotationHandles.Count; i++)
+            {
+                if (viewModel.AnnotationHandles[i].Handle == handle)
+                {
+                    return viewModel.AnnotationHandles[i];
+                }
+            }
+
+            return null;
         }
 
         /// <summary>点 (x, y) 是否落在以 (x1,y1)-(x2,y2) 为轴的胶囊带内（用于校验涂抹范围）。</summary>
