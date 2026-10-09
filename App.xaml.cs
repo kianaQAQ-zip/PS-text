@@ -6,7 +6,6 @@ using PSText.Services;
 using PSText.Services.Interfaces;
 using PSText.ViewModels;
 using PSText.Views;
-
 namespace PSText
 {
     /// <summary>
@@ -32,6 +31,7 @@ namespace PSText
         public int Run(string[] args)
         {
             StartupArguments = args ?? new string[0];
+            CommandLineOptions options = CommandLineOptions.Parse(StartupArguments);
 
             // 全局异常兜底：任何未处理异常都要给出提示而不是静默退出。
             DispatcherUnhandledException += OnDispatcherUnhandledException;
@@ -44,15 +44,11 @@ namespace PSText
             _settingsService = new XmlSettingsService();
             AppSettings settings = _settingsService.Load();
 
-            // 自检模式：不创建窗口，跑完用例后直接返回退出码，便于自动化验证。
-            if (HasArgument("--selftest"))
+            // ---- 无界面模式：自检 / 注册关联 / 注销关联 / 查关联状态 / 查运行环境 ----
+            // 放在创建窗口之前，既省掉一整套 WPF 初始化，也让这些开关可以被脚本直接调用。
+            if (options.IsHeadless)
             {
-                // 自检里也会构造真实 Window（用于验证 XAML 资源能被解析），
-                // 因此必须先合并主题字典，否则窗口会因为找不到共享样式而抛 XamlParseException。
-                ThemeManager.Apply(this, AppTheme.Light);
-                _selfTestExitCode = SelfTest.Run(StartupArguments);
-                Shutdown(_selfTestExitCode);
-                return _selfTestExitCode;
+                return RunHeadless(options);
             }
 
             // ---- 组合根：服务 → ViewModel → View ----
@@ -63,6 +59,8 @@ namespace PSText
             MainViewModel viewModel = new MainViewModel(imageService, _dialogService, dispatcherService);
             viewModel.PrintService = printService;
             viewModel.SettingsService = _settingsService;
+            viewModel.FileAssociationService = new FileAssociationService();
+            viewModel.RuntimeInfo = DotNetRuntimeProbe.Probe();
 
             // 主题与通用样式必须在创建窗口前合并（见 ThemeManager 的说明：窗口解析阶段的
             // StaticResource 查不到 App.xaml 里静态合并的字典，必须代码合并）。
@@ -71,10 +69,23 @@ namespace PSText
             MainWindow window = new MainWindow { DataContext = viewModel };
 
             // 支持通过命令行传入图片路径（例如“打开方式”关联）
-            string initialFile = GetFirstImageArgument(StartupArguments);
+            string initialFile = options.ImagePath;
             if (!string.IsNullOrWhiteSpace(initialFile))
             {
                 window.Loaded += async (sender, eventArgs) => await viewModel.LoadFromPathAsync(initialFile);
+            }
+
+            // 运行环境提醒。
+            //
+            // 为什么这条提示是必要的：本程序没有 App.config，声明的是 CLR v4.0，
+            // 因此在只装了 .NET 4.5 / 4.6.2 的 Win7 机器上 **exe 能启动**，却会在用到
+            // 4.8 才有的 API 时半路崩溃 —— 用户看到的是"用着用着就闪退"，无从判断原因。
+            // 启动时把实际检测到的版本说清楚，比事后翻崩溃日志友好得多。
+            if (viewModel.RuntimeInfo.ProbeSucceeded && !viewModel.RuntimeInfo.IsNet48OrLater)
+            {
+                window.Loaded += (sender, eventArgs) => _dialogService.ShowInformation(
+                    BuildRuntimeWarning(viewModel.RuntimeInfo),
+                    "运行环境提示");
             }
 
             MainWindow = window;
@@ -85,6 +96,113 @@ namespace PSText
             int exitCode = base.Run();
             return _selfTestExitCode != 0 ? _selfTestExitCode : exitCode;
         }
+
+        #region 无界面模式
+
+        /// <summary>
+        /// 处理不需要界面的启动模式。
+        ///
+        /// 这些开关存在的意义不只是给开发者用：免安装版要做"绿色部署"，
+        /// 就得能在安装脚本里直接注册文件关联，而不是让部署的人挨个点菜单。
+        /// </summary>
+        private int RunHeadless(CommandLineOptions options)
+        {
+            ConsoleBridge console = new ConsoleBridge();
+
+            switch (options.Mode)
+            {
+                case StartupMode.SelfTest:
+                    // 自检里也会构造真实 Window（用于验证 XAML 资源能被解析），
+                    // 因此必须先合并主题字典，否则窗口会因为找不到共享样式而抛 XamlParseException。
+                    ThemeManager.Apply(this, AppTheme.Light);
+                    _selfTestExitCode = SelfTest.Run(StartupArguments);
+                    Shutdown(_selfTestExitCode);
+                    return _selfTestExitCode;
+
+                case StartupMode.RegisterAssociation:
+                {
+                    IFileAssociationService service = new FileAssociationService();
+                    FileAssociationResult result = service.Register();
+                    console.Report("PS-text 文件关联", result.Message, !result.Success);
+                    Shutdown(result.Success ? 0 : 1);
+                    return result.Success ? 0 : 1;
+                }
+
+                case StartupMode.UnregisterAssociation:
+                {
+                    IFileAssociationService service = new FileAssociationService();
+                    FileAssociationResult result = service.Unregister();
+                    console.Report("PS-text 文件关联", result.Message, !result.Success);
+                    Shutdown(result.Success ? 0 : 1);
+                    return result.Success ? 0 : 1;
+                }
+
+                case StartupMode.AssociationStatus:
+                {
+                    IFileAssociationService service = new FileAssociationService();
+                    string text = DescribeAssociationState(service);
+                    console.Report("PS-text 文件关联", text, false);
+                    Shutdown(0);
+                    return 0;
+                }
+
+                default:
+                {
+                    RuntimeEnvironmentInfo info = DotNetRuntimeProbe.Probe();
+                    info.SettingsFilePath = _settingsService != null ? _settingsService.SettingsFilePath : null;
+                    info.LogDirectory = CrashLogger.LogDirectory;
+
+                    console.Report("PS-text 运行环境", info.ToDisplayText(), false);
+                    Shutdown(info.IsNet48OrLater ? 0 : 1);
+                    return info.IsNet48OrLater ? 0 : 1;
+                }
+            }
+        }
+
+        private static string DescribeAssociationState(IFileAssociationService service)
+        {
+            FileAssociationState state = service.GetState();
+            StringBuilder builder = new StringBuilder();
+
+            switch (state)
+            {
+                case FileAssociationState.Registered:
+                    builder.AppendLine("状态：已注册（指向当前这一份程序）");
+                    break;
+                case FileAssociationState.RegisteredForAnotherCopy:
+                    builder.AppendLine("状态：已注册，但指向**另一份**程序");
+                    builder.AppendLine("（绿色版被移动过之后会出现这种情况，重新注册即可修正）");
+                    break;
+                default:
+                    builder.AppendLine("状态：未注册");
+                    break;
+            }
+
+            builder.AppendLine("ProgID：" + service.ProgId);
+            builder.AppendLine("打开命令：" + (service.RegisteredCommandText ?? "（无）"));
+            builder.AppendLine();
+            builder.AppendLine("注册：PS-text.exe --register");
+            builder.AppendLine("注销：PS-text.exe --unregister");
+
+            return builder.ToString().TrimEnd();
+        }
+
+        private static string BuildRuntimeWarning(RuntimeEnvironmentInfo info)
+        {
+            return string.Format(
+                System.Globalization.CultureInfo.InvariantCulture,
+                "检测到当前系统安装的 .NET Framework 版本低于 4.8。\n\n"
+                + "检测到：{0}（Release {1}）\n"
+                + "本程序需要：.NET Framework 4.8 或更高\n\n"
+                + "程序仍然可以启动，但部分功能可能会异常或在使用中闪退。\n"
+                + "建议先安装 .NET Framework 4.8 再使用：\n{2}\n\n"
+                + "（Windows 7 SP1 请选择“4.8 运行时”，不要选 4.8.1 及以上，它们不支持 Win7。）",
+                info.NetVersionText ?? "未知",
+                info.NetRelease,
+                DotNetRuntimeProbe.DownloadUrl);
+        }
+
+        #endregion
 
         protected override void OnExit(ExitEventArgs e)
         {
@@ -108,59 +226,6 @@ namespace PSText
             ThemeManager.Persist(this);
             base.OnExit(e);
         }
-
-        #region 参数解析
-
-        private static bool HasArgument(string name)
-        {
-            string[] arguments = StartupArguments;
-            if (arguments == null)
-            {
-                return false;
-            }
-
-            foreach (string argument in arguments)
-            {
-                if (string.Equals(argument, name, StringComparison.OrdinalIgnoreCase))
-                {
-                    return true;
-                }
-            }
-
-            return false;
-        }
-
-        private static string GetFirstImageArgument(string[] arguments)
-        {
-            if (arguments == null)
-            {
-                return null;
-            }
-
-            foreach (string argument in arguments)
-            {
-                if (string.IsNullOrWhiteSpace(argument) || argument.StartsWith("-", StringComparison.Ordinal))
-                {
-                    continue;
-                }
-
-                try
-                {
-                    if (System.IO.File.Exists(argument))
-                    {
-                        return argument;
-                    }
-                }
-                catch (ArgumentException)
-                {
-                    // 非法路径忽略。
-                }
-            }
-
-            return null;
-        }
-
-        #endregion
 
         #region 全局异常处理
 

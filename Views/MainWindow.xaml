@@ -111,6 +111,23 @@
         </MenuItem>
       </MenuItem>
 
+      <MenuItem Header="工具(_T)">
+        <MenuItem Header="文件关联">
+          <MenuItem Header="注册（加入“打开方式”列表）"
+                    Command="{Binding RegisterFileAssociationCommand}" />
+          <MenuItem Header="注销"
+                    Command="{Binding UnregisterFileAssociationCommand}" />
+          <Separator />
+          <MenuItem Header="查看当前状态…"
+                    Command="{Binding ShowFileAssociationStatusCommand}" />
+          <MenuItem Header="打开系统的“设置默认程序”…"
+                    Command="{Binding OpenDefaultProgramsCommand}" />
+        </MenuItem>
+        <Separator />
+        <MenuItem Header="检测运行环境…" Command="{Binding ShowRuntimeInfoCommand}" />
+        <MenuItem Header="打开日志文件夹" Command="{Binding OpenLogFolderCommand}" />
+      </MenuItem>
+
       <MenuItem Header="帮助(_H)">
         <MenuItem Header="关于 PS-text" Command="{Binding ShowAboutCommand}" />
       </MenuItem>

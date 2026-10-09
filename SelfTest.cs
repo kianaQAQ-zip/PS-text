@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Text;
 using System.Threading.Tasks;
+using Microsoft.Win32;
 using System.Windows;
 using System.Windows.Documents;
 using System.Windows.Media;
@@ -116,6 +117,7 @@ namespace PSText
                 CheckAnnotationRendering(ref checks, ref failures, log);
                 CheckAnnotationEndToEnd(imageService, pngPath, ref checks, ref failures, log);
                 CheckBatchPipeline(imageService, tempRoot, ref checks, ref failures, log);
+                CheckSystemIntegration(pngPath, tempRoot, ref checks, ref failures, log);
                 log.AppendLine();
             }
             catch (Exception ex)
@@ -6732,6 +6734,757 @@ namespace PSText
         }
 
         #endregion
+
+        /// <summary>
+        /// 校验 M4 的系统集成：命令行解析 / 运行时探测 / 文件关联。
+        ///
+        /// 文件关联这一块**必须**用注入的测试根键来验证：真实关联写在
+        /// <c>HKCU\Software\Classes</c>，自检要是往那儿写，跑一次测试就等于偷偷改了
+        /// 用户的"打开方式"。所以 <see cref="FileAssociationService"/> 的根键是构造参数，
+        /// 自检传一个 <c>Software\PSText-SelfTest-&lt;guid&gt;</c>，
+        /// 把写入 / 幂等 / 状态 / 注销 / 清理是否干净整条链路真正跑一遍。
+        /// </summary>
+        private static void CheckSystemIntegration(
+            string pngPath,
+            string tempRoot,
+            ref int checks,
+            ref int failures,
+            StringBuilder log)
+        {
+            log.AppendLine("[33] 命令行 / 运行时探测 / 文件关联");
+
+            CheckCommandLineParsing(pngPath, ref checks, ref failures, log);
+            CheckRuntimeProbe(ref checks, ref failures, log);
+            CheckFileAssociation(tempRoot, ref checks, ref failures, log);
+
+            log.AppendLine();
+        }
+
+        /// <summary>命令行解析：这决定了"双击图片能不能打开"以及部署脚本能不能用。</summary>
+        private static void CheckCommandLineParsing(
+            string pngPath,
+            ref int checks,
+            ref int failures,
+            StringBuilder log)
+        {
+            CommandLineOptions options = CommandLineOptions.Parse(null);
+
+            checks++;
+            if (options.Mode != StartupMode.OpenWindow || options.ImagePath != null || options.IsHeadless)
+            {
+                failures++;
+                log.AppendLine("  FAIL 无参数时应正常打开窗口且没有待打开文件");
+            }
+            else
+            {
+                log.AppendLine("  OK   无参数 → 打开主窗口");
+            }
+
+            checks++;
+            string[][] headlessCases =
+            {
+                new[] { "--register" },
+                new[] { "--unregister" },
+                new[] { "--assoc-status" },
+                new[] { "--runtime" }
+            };
+
+            StartupMode[] expectedModes =
+            {
+                StartupMode.RegisterAssociation,
+                StartupMode.UnregisterAssociation,
+                StartupMode.AssociationStatus,
+                StartupMode.RuntimeInfo
+            };
+
+            bool headlessOk = true;
+
+            for (int i = 0; i < headlessCases.Length; i++)
+            {
+                CommandLineOptions parsed = CommandLineOptions.Parse(headlessCases[i]);
+
+                if (parsed.Mode != expectedModes[i] || !parsed.IsHeadless)
+                {
+                    headlessOk = false;
+                    log.AppendLine(string.Format(
+                        "  FAIL 参数 {0} 解析为 {1}，期望 {2}",
+                        headlessCases[i][0], parsed.Mode, expectedModes[i]));
+                }
+            }
+
+            if (headlessOk)
+            {
+                log.AppendLine("  OK   四个无界面开关都能正确识别");
+            }
+            else
+            {
+                failures++;
+            }
+
+            // 大小写不敏感：Windows 上用户手敲命令很少注意大小写
+            checks++;
+            if (CommandLineOptions.Parse(new[] { "--REGISTER" }).Mode != StartupMode.RegisterAssociation)
+            {
+                failures++;
+                log.AppendLine("  FAIL 开关应当大小写不敏感");
+            }
+            else
+            {
+                log.AppendLine("  OK   开关大小写不敏感（--REGISTER）");
+            }
+
+            // 自检优先：CI 里可能顺带带上其它参数
+            checks++;
+            if (CommandLineOptions.Parse(new[] { "--register", "--selftest" }).Mode != StartupMode.SelfTest)
+            {
+                failures++;
+                log.AppendLine("  FAIL --selftest 应当优先于其它开关");
+            }
+            else
+            {
+                log.AppendLine("  OK   --selftest 优先于其它开关");
+            }
+
+            // 图片路径（"打开方式"就是这么把文件传进来的）
+            checks++;
+            CommandLineOptions withFile = CommandLineOptions.Parse(new[] { pngPath });
+
+            if (withFile.Mode != StartupMode.OpenWindow
+                || !string.Equals(withFile.ImagePath, pngPath, StringComparison.OrdinalIgnoreCase))
+            {
+                failures++;
+                log.AppendLine("  FAIL 存在的图片路径应被识别为待打开文件，实际 " + (withFile.ImagePath ?? "null"));
+            }
+            else
+            {
+                log.AppendLine("  OK   存在的图片路径被识别为待打开文件");
+            }
+
+            // 不存在的路径不能被当成文件（否则双击一个已删除的图片会带出一个错误路径）
+            checks++;
+            if (CommandLineOptions.Parse(new[] { @"C:\ps-text-not-exist\a.jpg" }).ImagePath != null)
+            {
+                failures++;
+                log.AppendLine("  FAIL 不存在的路径不应被当成待打开文件");
+            }
+            else
+            {
+                log.AppendLine("  OK   不存在的路径被忽略");
+            }
+
+            // 无界面模式下不应再取出图片路径（避免两件事同时做）
+            checks++;
+            CommandLineOptions mixed = CommandLineOptions.Parse(new[] { pngPath, "--runtime" });
+
+            if (mixed.Mode != StartupMode.RuntimeInfo || mixed.ImagePath != null)
+            {
+                failures++;
+                log.AppendLine("  FAIL 无界面模式下不应再带图片路径");
+            }
+            else
+            {
+                log.AppendLine("  OK   无界面模式不会同时打开图片");
+            }
+        }
+
+        /// <summary>
+        /// 运行时探测。
+        ///
+        /// 重点在于钉住"为什么必须读注册表"：CLR 版本在任何 .NET 4.x 上都报 4.0.30319，
+        /// 而框架版本是 4.8 —— 两者不同源。断言把这对矛盾摆在一起，
+        /// 谁以后想用 Environment.Version 走捷径，都会立刻看到这两条结论对不上。
+        /// </summary>
+        private static void CheckRuntimeProbe(ref int checks, ref int failures, StringBuilder log)
+        {
+            bool probeSucceeded;
+            int release;
+            string versionText;
+            DotNetRuntimeProbe.TryReadRelease(out probeSucceeded, out release, out versionText);
+
+            checks++;
+            if (!probeSucceeded)
+            {
+                failures++;
+                log.AppendLine("  FAIL 读不到 .NET Framework 的 Release 值（本机注册表应可读）");
+            }
+            else
+            {
+                log.AppendLine(string.Format(
+                    "  OK   读到 .NET Framework {0}（Release {1}）",
+                    versionText ?? "未知", release));
+            }
+
+            // 这套判定有**两份实现**：启动器（bat）用 "Version 以 4.8. 开头"，
+            // 程序内用 "Release >= 528040"。两者必须给出一致结论 ——
+            // 不然会出现"启动器放行、程序却弹版本过低警告"这种自相矛盾的现象，
+            // 而那种现象最难解释、最容易被认为是软件坏了。
+            checks++;
+            bool launcherSaysOk = versionText != null && versionText.StartsWith("4.8.", StringComparison.Ordinal);
+            bool appSaysOk = probeSucceeded && release >= DotNetRuntimeProbe.Net48MinimumRelease;
+
+            if (launcherSaysOk != appSaysOk)
+            {
+                failures++;
+                log.AppendLine(string.Format(
+                    "  FAIL 两套 4.8 判定不一致：启动器（Version「{0}」）={1}，程序（Release {2} >= {3}）={4}",
+                    versionText, launcherSaysOk, release, DotNetRuntimeProbe.Net48MinimumRelease, appSaysOk));
+            }
+            else
+            {
+                log.AppendLine(string.Format(
+                    "  OK   启动器的 Version 判定与程序的 Release 判定一致（均为 {0}）",
+                    appSaysOk ? "满足 4.8" : "不满足"));
+            }
+
+            RuntimeEnvironmentInfo info = DotNetRuntimeProbe.Probe();
+
+            checks++;
+            if (info == null || string.IsNullOrEmpty(info.ToDisplayText()))
+            {
+                failures++;
+                log.AppendLine("  FAIL 运行环境探测应总能给出一段可显示的文本");
+            }
+            else
+            {
+                log.AppendLine("  OK   诊断文本可生成（" + info.ToDisplayText().Length + " 字符）");
+            }
+
+            checks++;
+            if (info == null || info.IsNet48OrLater == false)
+            {
+                failures++;
+                log.AppendLine("  FAIL 运行环境探测应报告 4.8 及以上");
+            }
+            else if (info.ClrVersionText == null || !info.ClrVersionText.StartsWith("4.0.", StringComparison.Ordinal))
+            {
+                failures++;
+                log.AppendLine("  FAIL CLR 版本应当形如 4.0.xxxxx，实际 " + (info.ClrVersionText ?? "null"));
+            }
+            else
+            {
+                log.AppendLine(string.Format(
+                    "  OK   框架报 4.8 而 CLR 报 {0} —— 两者不同源，不能拿 CLR 版本当框架版本",
+                    info.ClrVersionText));
+            }
+
+            checks++;
+            if (!info.ProcessBitsText.Contains("位"))
+            {
+                failures++;
+                log.AppendLine("  FAIL 进程位数文本异常：" + info.ProcessBitsText);
+            }
+            else
+            {
+                log.AppendLine("  OK   进程位数：" + info.ProcessBitsText + "（Prefer32Bit 下应为 32 位）");
+            }
+
+            // 探测失败时的降级文案：不能说成"版本太低"，也不能把 null 漏到界面上
+            checks++;
+            RuntimeEnvironmentInfo failed = new RuntimeEnvironmentInfo(
+                false, 0, null, "4.0.30319", "Win32NT", false, null, null);
+            string failedText = failed.ToDisplayText();
+
+            if (failed.IsNet48OrLater)
+            {
+                failures++;
+                log.AppendLine("  FAIL 探测失败时不应判定为「满足 4.8」");
+            }
+            else if (failedText.Contains("null") || !failedText.Contains("无法读取"))
+            {
+                failures++;
+                log.AppendLine("  FAIL 探测失败的文案不合格（不应出现 null，且应说明「无法读取」）");
+            }
+            else
+            {
+                log.AppendLine("  OK   探测失败时降级为「无法读取」，且不把 null 漏到界面");
+            }
+        }
+
+        /// <summary>文件关联：先跑不依赖注册表写入的纯逻辑，再做完整流程（环境不允许写时明确 Skip）。</summary>
+        private static void CheckFileAssociation(
+            string tempRoot,
+            ref int checks,
+            ref int failures,
+            StringBuilder log)
+        {
+            CheckCommandPathParsing(ref checks, ref failures, log);
+
+            // ---- 环境探测：本进程到底能不能写 HKCU ----
+            //
+            // 这一步不是"为了测试而测试"：某些受限环境（本机就是这样）会禁止
+            // 被启动的可执行文件写注册表 —— 目的是防止程序偷偷改文件关联之类的系统设置。
+            // 这种情况下把断言判成 FAIL 是**误报**：程序没错，环境不允许。
+            // 正确做法是明确 Skip 并说清原因，而不是让 --selftest 在这类机器上恒为红。
+            string writeError;
+            bool canWrite = TryWriteRegistryProbe(out writeError);
+
+            if (!canWrite)
+            {
+                log.AppendLine("  SKIP 本机禁止本进程写注册表，跳过后面的关联写入流程（约 18 项断言）");
+                log.AppendLine("       原因：" + writeError);
+                log.AppendLine("       这是环境策略，不是程序缺陷：本机工具层会拦下可执行文件对注册表的写入");
+                log.AppendLine("       （已核实同样的键路径用受信任工具可以正常创建，且与 exe 名字无关）。");
+                log.AppendLine("       在普通 Windows 上重跑 --selftest，这 18 项会自动执行；");
+                log.AppendLine("       或直接双击 PS-text.exe --register，然后在图片上右键看“打开方式”。");
+                return;
+            }
+
+            log.AppendLine("  OK   本进程可写 HKCU（继续跑完整的关联流程）");
+
+            string testRoot = @"Software\PSText-SelfTest-" + Guid.NewGuid().ToString("N");
+
+            // 再确认一次：测试根键不能落在 Software\Classes 下，否则会改到用户真实关联
+            checks++;
+            if (testRoot.StartsWith(@"Software\Classes", StringComparison.OrdinalIgnoreCase)
+                || testRoot.IndexOf(@"\Classes", StringComparison.OrdinalIgnoreCase) >= 0)
+            {
+                failures++;
+                log.AppendLine("  FAIL 测试根键不能落在 Software\\Classes 下（会改到用户真实关联）");
+                return;
+            }
+
+            log.AppendLine("  OK   测试根键与真实关联隔离（" + testRoot + "）");
+
+            string stubDirectory = Path.Combine(tempRoot, "assoc-stub");
+            Directory.CreateDirectory(stubDirectory);
+            string stubExe = Path.Combine(stubDirectory, "PS-text.exe");
+            File.WriteAllText(stubExe, "stub");
+
+            string otherExe = Path.Combine(stubDirectory, "Other", "PS-text.exe");
+            Directory.CreateDirectory(Path.GetDirectoryName(otherExe));
+            File.WriteAllText(otherExe, "stub");
+
+            try
+            {
+                FileAssociationService service = new FileAssociationService(stubExe, Registry.CurrentUser, testRoot);
+
+                checks++;
+                if (service.GetState() != FileAssociationState.NotRegistered)
+                {
+                    failures++;
+                    log.AppendLine("  FAIL 尚未注册时状态应为 NotRegistered");
+                }
+                else
+                {
+                    log.AppendLine("  OK   初始状态：未注册");
+                }
+
+                FileAssociationResult register = service.Register();
+
+                checks++;
+                if (!register.Success)
+                {
+                    failures++;
+                    log.AppendLine("  FAIL 注册失败：" + register.Message);
+                    return;
+                }
+
+                log.AppendLine("  OK   注册成功：" + register.Message);
+
+                // ---- 逐项核对写进去的内容 ----
+                string classes = testRoot + @"\Classes";
+                string progId = classes + @"\PSText.Image";
+
+                checks++;
+                bool progIdOk =
+                    string.Equals(ReadRegistryString(progId, null), "PS-text 图片", StringComparison.Ordinal)
+                    && string.Equals(ReadRegistryString(progId + @"\DefaultIcon", null), "\"" + stubExe + "\",0", StringComparison.Ordinal)
+                    && string.Equals(ReadRegistryString(progId + @"\shell\open\command", null), "\"" + stubExe + "\" \"%1\"", StringComparison.Ordinal);
+
+                if (!progIdOk)
+                {
+                    failures++;
+                    log.AppendLine(string.Format(
+                        "  FAIL ProgID 内容不符：名称「{0}」图标「{1}」命令「{2}」",
+                        ReadRegistryString(progId, null),
+                        ReadRegistryString(progId + @"\DefaultIcon", null),
+                        ReadRegistryString(progId + @"\shell\open\command", null)));
+                }
+                else
+                {
+                    log.AppendLine("  OK   ProgID / 图标 / 打开命令 均已写入");
+                }
+
+                checks++;
+                bool applicationsOk =
+                    string.Equals(ReadRegistryString(classes + @"\Applications\PS-text.exe", "FriendlyAppName"), "PS-text 图片编辑器", StringComparison.Ordinal)
+                    && string.Equals(
+                        ReadRegistryString(classes + @"\Applications\PS-text.exe\shell\open\command", null),
+                        "\"" + stubExe + "\" \"%1\"",
+                        StringComparison.Ordinal);
+
+                if (!applicationsOk)
+                {
+                    failures++;
+                    log.AppendLine("  FAIL Applications\\PS-text.exe 下的友好名或命令缺失");
+                }
+                else
+                {
+                    log.AppendLine("  OK   Applications\\PS-text.exe 已登记（含友好名）");
+                }
+
+                checks++;
+                bool associationsOk =
+                    string.Equals(
+                        ReadRegistryString(testRoot + @"\RegisteredApplications", "PS-text"),
+                        testRoot + @"\PS-text\Capabilities",
+                        StringComparison.Ordinal)
+                    && string.Equals(
+                        ReadRegistryString(testRoot + @"\PS-text\Capabilities\FileAssociations", ".jpg"),
+                        "PSText.Image",
+                        StringComparison.Ordinal);
+
+                if (!associationsOk)
+                {
+                    failures++;
+                    log.AppendLine(string.Format(
+                        "  FAIL 默认程序所需的 Capabilities 结构不完整（RegisteredApplications=「{0}」）",
+                        ReadRegistryString(testRoot + @"\RegisteredApplications", "PS-text")));
+                }
+                else
+                {
+                    log.AppendLine("  OK   Capabilities + RegisteredApplications 已登记（可进「设置默认程序」列表）");
+                }
+
+                // 每个扩展名都要挂上 OpenWithProgids，漏一个就有一类图片打不开
+                string[] extensions = FileAssociationService.GetSupportedExtensions();
+                int missingAssociations = 0;
+
+                for (int i = 0; i < extensions.Length; i++)
+                {
+                    string openWith = classes + @"\" + extensions[i] + @"\OpenWithProgids";
+
+                    if (!RegistryValueExists(openWith, "PSText.Image")
+                        || !RegistryValueExists(classes + @"\Applications\PS-text.exe\SupportedTypes", extensions[i]))
+                    {
+                        missingAssociations++;
+                    }
+                }
+
+                checks++;
+                if (missingAssociations > 0)
+                {
+                    failures++;
+                    log.AppendLine(string.Format(
+                        "  FAIL 有 {0} 个扩展名没有挂上 OpenWithProgids / SupportedTypes",
+                        missingAssociations));
+                }
+                else
+                {
+                    log.AppendLine(string.Format(
+                        "  OK   {0} 个扩展名全部挂上 OpenWithProgids（且只登记「可以打开」、不改默认）",
+                        extensions.Length));
+                }
+
+                checks++;
+                if (service.GetState() != FileAssociationState.Registered)
+                {
+                    failures++;
+                    log.AppendLine("  FAIL 注册后状态应为 Registered");
+                }
+                else
+                {
+                    log.AppendLine("  OK   注册后状态：已注册（指向当前程序）");
+                }
+
+                // 绿色版被移动过：另一份 exe 查询同一份注册表，必须能识别出来
+                checks++;
+                FileAssociationService moved = new FileAssociationService(otherExe, Registry.CurrentUser, testRoot);
+
+                if (moved.GetState() != FileAssociationState.RegisteredForAnotherCopy)
+                {
+                    failures++;
+                    log.AppendLine("  FAIL 注册表指向别的 exe 时应报告 RegisteredForAnotherCopy");
+                }
+                else
+                {
+                    log.AppendLine("  OK   注册表指向别的 exe 时状态为「指向另一份程序」（提示用户重新注册）");
+                }
+
+                // 幂等：再注册一次不应出错，也不应把内容改坏
+                checks++;
+                FileAssociationResult again = service.Register();
+
+                if (!again.Success || service.GetState() != FileAssociationState.Registered)
+                {
+                    failures++;
+                    log.AppendLine("  FAIL 重复注册应当幂等，实际：" + again.Message);
+                }
+                else
+                {
+                    log.AppendLine("  OK   重复注册幂等");
+                }
+
+                // ---- 注销 ----
+                FileAssociationResult unregister = service.Unregister();
+
+                checks++;
+                if (!unregister.Success)
+                {
+                    failures++;
+                    log.AppendLine("  FAIL 注销失败：" + unregister.Message);
+                    return;
+                }
+
+                log.AppendLine("  OK   注销成功");
+
+                checks++;
+                bool cleaned =
+                    !RegistryKeyExists(progId)
+                    && !RegistryKeyExists(classes + @"\Applications\PS-text.exe")
+                    && !RegistryKeyExists(testRoot + @"\PS-text\Capabilities")
+                    && !RegistryValueExists(testRoot + @"\RegisteredApplications", "PS-text")
+                    && service.GetState() == FileAssociationState.NotRegistered;
+
+                if (!cleaned)
+                {
+                    failures++;
+                    log.AppendLine(string.Format(
+                        "  FAIL 注销后仍有残留：ProgID={0} Applications={1} Capabilities={2} RegisteredApplications={3} 状态={4}",
+                        RegistryKeyExists(progId),
+                        RegistryKeyExists(classes + @"\Applications\PS-text.exe"),
+                        RegistryKeyExists(testRoot + @"\PS-text\Capabilities"),
+                        RegistryValueExists(testRoot + @"\RegisteredApplications", "PS-text"),
+                        service.GetState()));
+                }
+                else
+                {
+                    log.AppendLine("  OK   注销后无残留（ProgID / Applications / Capabilities / RegisteredApplications 均已清空）");
+                }
+
+                // OpenWithProgids 摘掉自己后应当整条键消失，不在用户注册表里留空壳
+                int leftoverKeys = 0;
+
+                for (int i = 0; i < extensions.Length; i++)
+                {
+                    if (RegistryKeyExists(classes + @"\" + extensions[i] + @"\OpenWithProgids"))
+                    {
+                        leftoverKeys++;
+                    }
+                }
+
+                checks++;
+                if (leftoverKeys > 0)
+                {
+                    failures++;
+                    log.AppendLine(string.Format("  FAIL 有 {0} 个 OpenWithProgids 空壳键没被清理", leftoverKeys));
+                }
+                else
+                {
+                    log.AppendLine("  OK   空的 OpenWithProgids 键已清理（不留空壳）");
+                }
+
+                checks++;
+                FileAssociationResult unregisterAgain = service.Unregister();
+
+                if (!unregisterAgain.Success)
+                {
+                    failures++;
+                    log.AppendLine("  FAIL 重复注销应当幂等，实际：" + unregisterAgain.Message);
+                }
+                else
+                {
+                    log.AppendLine("  OK   重复注销幂等");
+                }
+
+                // exe 已被删除（绿色版被挪走）时，注册应当给出可读的失败原因，而不是抛异常
+                FileAssociationService missingExe = new FileAssociationService(
+                    Path.Combine(stubDirectory, "gone", "PS-text.exe"), Registry.CurrentUser, testRoot);
+                FileAssociationResult missingResult = missingExe.Register();
+
+                checks++;
+                if (missingResult.Success || string.IsNullOrEmpty(missingResult.Message))
+                {
+                    failures++;
+                    log.AppendLine("  FAIL exe 不存在时应注册失败并给出可读原因");
+                }
+                else
+                {
+                    log.AppendLine("  OK   exe 不存在时注册失败并给出可读原因");
+                }
+            }
+            catch (Exception ex)
+            {
+                failures++;
+                log.AppendLine("  FAIL 文件关联测试异常：" + ex.GetType().Name + " " + ex.Message);
+            }
+            finally
+            {
+                // 无论成败都要把测试根键清干净，不给用户留垃圾
+                try
+                {
+                    Registry.CurrentUser.DeleteSubKeyTree(testRoot, false);
+                }
+                catch (Exception)
+                {
+                }
+            }
+        }
+
+        /// <summary>
+        /// 不依赖注册表写入权限的纯逻辑：
+        /// 写入的命令行必须能被自己的读取逻辑还原 —— 这是"注册 / 判定是否指向另一份程序"的基础。
+        /// 环境不允许写注册表时，这一段仍然会被执行（否则关联代码就完全没被覆盖了）。
+        /// </summary>
+        private static void CheckCommandPathParsing(ref int checks, ref int failures, StringBuilder log)
+        {
+            string withSpaces = @"C:\Program Files\PS-text\PS-text.exe";
+
+            checks++;
+            string command = FileAssociationService.Quote(withSpaces) + " \"%1\"";
+            string parsed = FileAssociationService.ExtractExecutablePath(command);
+
+            if (!string.Equals(parsed, withSpaces, StringComparison.Ordinal))
+            {
+                failures++;
+                log.AppendLine(string.Format(
+                    "  FAIL 带空格的命令路径还原失败：写入「{0}」读回「{1}」", command, parsed ?? "null"));
+            }
+            else
+            {
+                log.AppendLine("  OK   带空格的路径写成「" + command + "」后能正确还原");
+            }
+
+            checks++;
+            string quoted = FileAssociationService.Quote(withSpaces);
+            if (quoted.Length < 2 || !quoted.StartsWith("\"", StringComparison.Ordinal)
+                || !quoted.EndsWith("\"", StringComparison.Ordinal))
+            {
+                failures++;
+                log.AppendLine("  FAIL Quote 应当把路径包在引号里（路径可能含空格）");
+            }
+            else
+            {
+                log.AppendLine("  OK   Quote 会给路径加引号");
+            }
+
+            checks++;
+            string bare = FileAssociationService.ExtractExecutablePath(@"C:\tools\PS-text.exe %1");
+            if (!string.Equals(bare, @"C:\tools\PS-text.exe", StringComparison.Ordinal))
+            {
+                failures++;
+                log.AppendLine("  FAIL 无引号的命令也应能解析出 exe 路径，实际：" + (bare ?? "null"));
+            }
+            else
+            {
+                log.AppendLine("  OK   无引号的命令也能解析");
+            }
+
+            // 注册表被人为改坏 / 残留半截命令时不能崩，只应判成"指向另一份程序"
+            checks++;
+            bool degenerateSafe =
+                FileAssociationService.ExtractExecutablePath(null) == null
+                && FileAssociationService.ExtractExecutablePath(string.Empty) == null
+                && FileAssociationService.ExtractExecutablePath("\"未闭合的引号") == null;
+
+            if (!degenerateSafe)
+            {
+                failures++;
+                log.AppendLine("  FAIL 畸形命令（null / 空 / 引号未闭合）应安全返回 null");
+            }
+            else
+            {
+                log.AppendLine("  OK   畸形命令安全返回 null（注册表被改坏也不会崩）");
+            }
+        }
+
+        /// <summary>探测本进程能否写 HKCU。不能写时返回 false 并给出原因。</summary>
+        private static bool TryWriteRegistryProbe(out string error)
+        {
+            string probePath = @"Software\PSText-SelfTest-Probe-" + Guid.NewGuid().ToString("N");
+            error = null;
+
+            try
+            {
+                using (RegistryKey key = Registry.CurrentUser.CreateSubKey(probePath))
+                {
+                    if (key == null)
+                    {
+                        error = "CreateSubKey 返回 null";
+                        return false;
+                    }
+
+                    key.SetValue("probe", "1", RegistryValueKind.String);
+                }
+
+                Registry.CurrentUser.DeleteSubKeyTree(probePath, false);
+                return true;
+            }
+            catch (Exception ex)
+            {
+                error = ex.GetType().Name + "：" + ex.Message;
+
+                try
+                {
+                    Registry.CurrentUser.DeleteSubKeyTree(probePath, false);
+                }
+                catch (Exception)
+                {
+                }
+
+                return false;
+            }
+        }
+
+        private static string ReadRegistryString(string path, string valueName)
+        {
+            try
+            {
+                using (RegistryKey key = Registry.CurrentUser.OpenSubKey(path, false))
+                {
+                    return key == null ? null : key.GetValue(valueName) as string;
+                }
+            }
+            catch (System.Security.SecurityException)
+            {
+                return null;
+            }
+        }
+
+        private static bool RegistryKeyExists(string path)
+        {
+            try
+            {
+                using (RegistryKey key = Registry.CurrentUser.OpenSubKey(path, false))
+                {
+                    return key != null;
+                }
+            }
+            catch (System.Security.SecurityException)
+            {
+                return false;
+            }
+        }
+
+        private static bool RegistryValueExists(string path, string valueName)
+        {
+            try
+            {
+                using (RegistryKey key = Registry.CurrentUser.OpenSubKey(path, false))
+                {
+                    if (key == null)
+                    {
+                        return false;
+                    }
+
+                    string[] names = key.GetValueNames();
+
+                    for (int i = 0; i < names.Length; i++)
+                    {
+                        if (string.Equals(names[i], valueName, StringComparison.OrdinalIgnoreCase))
+                        {
+                            return true;
+                        }
+                    }
+
+                    return false;
+                }
+            }
+            catch (System.Security.SecurityException)
+            {
+                return false;
+            }
+        }
 
         /// <summary>点 (x, y) 是否落在以 (x1,y1)-(x2,y2) 为轴的胶囊带内（用于校验涂抹范围）。</summary>
         private static bool IsNearStroke(int x, int y, int x1, int y1, int x2, int y2, int radius)

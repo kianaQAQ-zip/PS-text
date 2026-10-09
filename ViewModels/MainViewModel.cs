@@ -192,6 +192,9 @@ namespace PSText.ViewModels
             // 批量流水线命令（见 MainViewModel.Batch.cs）
             InitializeBatchCommands();
 
+            // 系统集成：文件关联 / 运行环境 / 日志目录（见 MainViewModel.System.cs）
+            InitializeSystemCommands();
+
             // 设置 / 主题 / 最近文件命令（见 MainViewModel.Settings.cs）
             InitializeSettingsCommands();
 
@@ -1030,14 +1033,9 @@ namespace PSText.ViewModels
 
         private void ShowAbout()
         {
-            _dialogService.ShowInformation(
-                "PS-text 图片编辑器\n\n"
-                + "· 支持 JPG / PNG / BMP / TIFF / GIF 的加载与保存\n"
-                + "· 滚轮缩放（10% ~ 1000%）、按住鼠标拖动或空格键平移\n"
-                + "· 双击画布在“适应窗口 / 原始大小”之间切换\n"
-                + "· 亮度 / 对比度 / 饱和度 / 色温实时预览，可撤销 30 步\n\n"
-                + "快捷键：Ctrl+O 打开，Ctrl+S 保存，Ctrl+Z / Ctrl+Y 撤销重做，Ctrl+P 打印",
-                "关于 PS-text");
+            // 文本在 MainViewModel.System.cs 里拼：那里能拿到运行环境与日志路径，
+            // 用户报问题时"关于"里的这几行往往就是最关键的信息。
+            _dialogService.ShowInformation(BuildAboutText(), "关于 PS-text");
         }
 
         #endregion

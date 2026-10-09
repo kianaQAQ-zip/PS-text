@@ -25,11 +25,11 @@
     <!-- 应用图标：同时作为 exe 图标与窗口图标（窗口 XAML 里用 pack URI 引用同一份） -->
     <ApplicationIcon>Resources\PS-text.ico</ApplicationIcon>
     <StartupObject>PSText.Program</StartupObject>
-    <AssemblyTitle>PS-text 图片编辑器</AssemblyTitle>
-    <Product>PS-text</Product>
-    <Company>PS-text</Company>
-    <Copyright>Copyright © 2025</Copyright>
-    <Description>图片加载、编辑、滤镜与打印工具（Windows 7 兼容）</Description>
+    <!--
+      注意：产品名 / 版本 / 版权等都写在 Properties\AssemblyInfo.cs 里，**不要**在这里再写一遍。
+      传统（非 SDK）csproj 不消费 AssemblyTitle / AssemblyVersion 这类 MSBuild 属性，
+      在这里写只会形成"看起来设置了、其实 exe 里还是 0.0.0.0"的假象（已实测踩过）。
+    -->
   </PropertyGroup>
 
   <!-- ============ Debug ============ -->
@@ -100,6 +100,7 @@
       <SubType>Code</SubType>
     </Compile>
     <Compile Include="Program.cs" />
+    <Compile Include="Properties\AssemblyInfo.cs" />
     <Compile Include="SelfTest.cs" />
   </ItemGroup>
 
@@ -174,6 +175,7 @@
     <Compile Include="Services\Interfaces\IDialogService.cs" />
     <Compile Include="Services\Interfaces\IDispatcherService.cs" />
     <Compile Include="Services\Interfaces\IPrintService.cs" />
+    <Compile Include="Services\Interfaces\IFileAssociationService.cs" />
     <Compile Include="Services\WpfDispatcherService.cs" />
     <Compile Include="Services\WpfDialogService.cs" />
     <Compile Include="Services\WpfImageService.cs" />
@@ -182,6 +184,10 @@
     <Compile Include="Services\AppSettings.cs" />
     <Compile Include="Services\CrashLogger.cs" />
     <Compile Include="Services\ProgressReporter.cs" />
+    <Compile Include="Services\DotNetRuntimeInfo.cs" />
+    <Compile Include="Services\FileAssociationService.cs" />
+    <Compile Include="Services\CommandLineOptions.cs" />
+    <Compile Include="Services\ConsoleBridge.cs" />
     <Compile Include="Services\Printing\PrintUnits.cs" />
     <Compile Include="Services\Printing\PrintLayout.cs" />
     <Compile Include="Services\Printing\ImagePrintPaginator.cs" />
@@ -215,6 +221,7 @@
     <Compile Include="ViewModels\MainViewModel.Annotation.cs" />
     <Compile Include="ViewModels\MainViewModel.Print.cs" />
     <Compile Include="ViewModels\MainViewModel.Batch.cs" />
+    <Compile Include="ViewModels\MainViewModel.System.cs" />
     <Compile Include="ViewModels\MainViewModel.Settings.cs" />
     <Compile Include="ViewModels\PrintPreviewViewModel.cs" />
     <Compile Include="ViewModels\ZoomMode.cs" />
