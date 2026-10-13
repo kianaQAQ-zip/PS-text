@@ -59,6 +59,14 @@ namespace PSText
             MainViewModel viewModel = new MainViewModel(imageService, _dialogService, dispatcherService);
             viewModel.PrintService = printService;
             viewModel.SettingsService = _settingsService;
+
+            // 语言：先从设置里恢复，再挂上字典。
+            // 必须在创建主窗口之前 —— 窗口里的 {DynamicResource Xxx} 在加载时就要能取到值，
+            // 晚一步的话界面会先闪一下键名再变成文字。
+            string savedLanguage = _settingsService.Load().LanguageCulture;
+            LocalizationService.Instance.SetLanguage(
+                string.IsNullOrWhiteSpace(savedLanguage) ? LocalizationService.DefaultCulture : savedLanguage);
+            LocalizationService.Instance.ApplyResources(this);
             viewModel.FileAssociationService = new FileAssociationService();
             viewModel.RuntimeInfo = DotNetRuntimeProbe.Probe();
 

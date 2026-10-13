@@ -13,6 +13,7 @@
         MinHeight="480"
         WindowStartupLocation="CenterScreen"
         AllowDrop="True"
+        Loaded="OnWindowLoaded"
         Background="{DynamicResource CanvasBackgroundBrush}"
         Foreground="{DynamicResource ChromeForegroundBrush}"
         FontFamily="Microsoft YaHei UI, Segoe UI"
@@ -54,11 +55,11 @@
     <Menu Grid.Row="0"
           Background="{DynamicResource ChromeBackgroundBrush}"
           Foreground="{DynamicResource ChromeForegroundBrush}">
-      <MenuItem Header="文件(_F)">
-        <MenuItem Header="打开(_O)…" InputGestureText="Ctrl+O" Command="{Binding OpenCommand}" />
-        <MenuItem Header="关闭当前标签页(_W)" InputGestureText="Ctrl+W"
+      <MenuItem Header="{DynamicResource Menu_File}">
+        <MenuItem Header="{DynamicResource Menu_Open}" InputGestureText="Ctrl+O" Command="{Binding OpenCommand}" />
+        <MenuItem Header="{DynamicResource Menu_CloseTab}" InputGestureText="Ctrl+W"
                   Command="{Binding CloseCurrentTabCommand}" />
-        <MenuItem Header="最近打开(_R)">
+        <MenuItem Header="{DynamicResource Menu_Recent}">
           <MenuItem ItemsSource="{Binding RecentFiles}"
                     IsEnabled="{Binding HasRecentFiles}">
             <MenuItem.ItemContainerStyle>
@@ -71,69 +72,80 @@
             </MenuItem.ItemContainerStyle>
           </MenuItem>
           <Separator />
-          <MenuItem Header="清空最近记录" Command="{Binding ClearRecentFilesCommand}" />
+          <MenuItem Header="{DynamicResource Menu_ClearRecent}" Command="{Binding ClearRecentFilesCommand}" />
         </MenuItem>
         <Separator />
-        <MenuItem Header="保存(_S)" InputGestureText="Ctrl+S" Command="{Binding SaveCommand}" />
-        <MenuItem Header="另存为(_A)…" InputGestureText="Ctrl+Shift+S" Command="{Binding SaveAsCommand}" />
+        <MenuItem Header="{DynamicResource Menu_Save}" InputGestureText="Ctrl+S" Command="{Binding SaveCommand}" />
+        <MenuItem Header="{DynamicResource Menu_SaveAs}" InputGestureText="Ctrl+Shift+S" Command="{Binding SaveAsCommand}" />
         <Separator />
-        <MenuItem Header="打印(_P)…" InputGestureText="Ctrl+P" Command="{Binding PrintPreviewCommand}" />
-        <MenuItem Header="直接打印(_D)…" Command="{Binding PrintCommand}" />
+        <MenuItem Header="{DynamicResource Menu_Print}" InputGestureText="Ctrl+P" Command="{Binding PrintPreviewCommand}" />
+        <MenuItem Header="{DynamicResource Menu_PrintDirect}" Command="{Binding PrintCommand}" />
         <Separator />
-        <MenuItem Header="退出(_X)" InputGestureText="Alt+F4" Click="OnExitClick" />
+        <MenuItem Header="{DynamicResource Menu_Exit}" InputGestureText="Alt+F4" Click="OnExitClick" />
       </MenuItem>
 
-      <MenuItem Header="编辑(_E)">
-        <MenuItem Header="撤销(_U)" InputGestureText="Ctrl+Z" Command="{Binding UndoCommand}" />
-        <MenuItem Header="重做(_R)" InputGestureText="Ctrl+Y" Command="{Binding RedoCommand}" />
+      <MenuItem Header="{DynamicResource Menu_Edit}">
+        <MenuItem Header="{DynamicResource Menu_Undo}" InputGestureText="Ctrl+Z" Command="{Binding UndoCommand}" />
+        <MenuItem Header="{DynamicResource Menu_Redo}" InputGestureText="Ctrl+Y" Command="{Binding RedoCommand}" />
         <Separator />
-        <MenuItem Header="复位基础调整" Command="{Binding ResetAdjustmentsCommand}" />
+        <MenuItem Header="{DynamicResource Menu_ResetAdjustments}" Command="{Binding ResetAdjustmentsCommand}" />
       </MenuItem>
 
-      <MenuItem Header="视图(_V)">
-        <MenuItem Header="适应窗口(_F)" InputGestureText="Ctrl+0" Command="{Binding FitToWindowCommand}" />
-        <MenuItem Header="原始大小(_A)" InputGestureText="Ctrl+1" Command="{Binding ActualSizeCommand}" />
+      <MenuItem Header="{DynamicResource Menu_View}">
+        <MenuItem Header="{DynamicResource Menu_FitToWindow}" InputGestureText="Ctrl+0" Command="{Binding FitToWindowCommand}" />
+        <MenuItem Header="{DynamicResource Menu_ActualSize}" InputGestureText="Ctrl+1" Command="{Binding ActualSizeCommand}" />
         <Separator />
-        <MenuItem Header="放大(_I)" InputGestureText="Ctrl++" Command="{Binding ZoomInCommand}" />
-        <MenuItem Header="缩小(_O)" InputGestureText="Ctrl+-" Command="{Binding ZoomOutCommand}" />
+        <MenuItem Header="{DynamicResource Menu_ZoomIn}" InputGestureText="Ctrl++" Command="{Binding ZoomInCommand}" />
+        <MenuItem Header="{DynamicResource Menu_ZoomOut}" InputGestureText="Ctrl+-" Command="{Binding ZoomOutCommand}" />
         <Separator />
-        <MenuItem Header="抓手工具" InputGestureText="空格" Command="{Binding ToggleHandToolCommand}" />
+        <MenuItem Header="{DynamicResource Menu_HandTool}" InputGestureText="{DynamicResource Menu_Space}" Command="{Binding ToggleHandToolCommand}" />
         <Separator />
-        <MenuItem Header="主题">
-          <MenuItem Header="跟随系统" IsCheckable="True"
+        <!-- i18n-exempt:start （语言选择项刻意不翻译：语言名要用它自己的文字显示，
+             否则英文用户会在一个全中文的菜单里找 English） -->
+        <MenuItem Header="{DynamicResource Menu_Language}">
+          <MenuItem Header="中文（简体）" IsCheckable="True"
+                    IsChecked="{Binding IsLanguageChinese, Mode=TwoWay}" />
+          <MenuItem Header="English" IsCheckable="True"
+                    IsChecked="{Binding IsLanguageEnglish, Mode=TwoWay}" />
+        </MenuItem>
+        <!-- i18n-exempt:end -->
+        <Separator />
+
+        <MenuItem Header="{DynamicResource Menu_Theme}">
+          <MenuItem Header="{DynamicResource Menu_ThemeFollowSystem}" IsCheckable="True"
                     IsChecked="{Binding IsSystemTheme, Mode=OneWay}"
                     Command="{Binding FollowSystemThemeCommand}" />
-          <MenuItem Header="浅色" IsCheckable="True"
+          <MenuItem Header="{DynamicResource Menu_ThemeLight}" IsCheckable="True"
                     IsChecked="{Binding IsLightTheme, Mode=OneWay}"
                     Command="{Binding SetThemeCommand}" CommandParameter="1" />
-          <MenuItem Header="深色" IsCheckable="True"
+          <MenuItem Header="{DynamicResource Menu_ThemeDark}" IsCheckable="True"
                     IsChecked="{Binding IsDarkTheme, Mode=OneWay}"
                     Command="{Binding SetThemeCommand}" CommandParameter="2" />
           <Separator />
-          <MenuItem Header="在浅色 / 深色间切换" InputGestureText="Ctrl+T"
+          <MenuItem Header="{DynamicResource Menu_ToggleTheme}" InputGestureText="Ctrl+T"
                     Command="{Binding ToggleThemeCommand}" />
         </MenuItem>
       </MenuItem>
 
-      <MenuItem Header="工具(_T)">
-        <MenuItem Header="文件关联">
-          <MenuItem Header="注册（打开方式 + 右键菜单）"
+      <MenuItem Header="{DynamicResource Menu_Tools}">
+        <MenuItem Header="{DynamicResource Menu_FileAssociation}">
+          <MenuItem Header="{DynamicResource Menu_AssocRegister}"
                     Command="{Binding RegisterFileAssociationCommand}" />
-          <MenuItem Header="注销"
+          <MenuItem Header="{DynamicResource Menu_AssocUnregister}"
                     Command="{Binding UnregisterFileAssociationCommand}" />
           <Separator />
-          <MenuItem Header="查看当前状态…"
+          <MenuItem Header="{DynamicResource Menu_AssocStatus}"
                     Command="{Binding ShowFileAssociationStatusCommand}" />
-          <MenuItem Header="打开系统的“设置默认程序”…"
+          <MenuItem Header="{DynamicResource Menu_OpenDefaultApps}"
                     Command="{Binding OpenDefaultProgramsCommand}" />
         </MenuItem>
         <Separator />
-        <MenuItem Header="检测运行环境…" Command="{Binding ShowRuntimeInfoCommand}" />
-        <MenuItem Header="打开日志文件夹" Command="{Binding OpenLogFolderCommand}" />
+        <MenuItem Header="{DynamicResource Menu_RuntimeInfo}" Command="{Binding ShowRuntimeInfoCommand}" />
+        <MenuItem Header="{DynamicResource Menu_OpenLogFolder}" Command="{Binding OpenLogFolderCommand}" />
       </MenuItem>
 
-      <MenuItem Header="帮助(_H)">
-        <MenuItem Header="关于 PS-text" Command="{Binding ShowAboutCommand}" />
+      <MenuItem Header="{DynamicResource Menu_Help}">
+        <MenuItem Header="{DynamicResource Menu_About}" Command="{Binding ShowAboutCommand}" />
       </MenuItem>
     </Menu>
 
@@ -146,28 +158,28 @@
 
         <!-- 左侧：文件操作 -->
         <StackPanel DockPanel.Dock="Left" Orientation="Horizontal">
-          <Button Content="打开 (Ctrl+O)"
+          <Button Content="{DynamicResource Tip_Open}"
                   Style="{StaticResource ToolbarButtonStyle}"
                   Command="{Binding OpenCommand}" />
-          <Button Content="保存 (Ctrl+S)"
+          <Button Content="{DynamicResource Tip_Save}"
                   Style="{StaticResource ToolbarButtonStyle}"
                   Command="{Binding SaveCommand}" />
-          <Button Content="另存为"
+          <Button Content="{DynamicResource Tip_SaveAs}"
                   Style="{StaticResource ToolbarButtonStyle}"
                   Command="{Binding SaveAsCommand}" />
           <Rectangle Style="{StaticResource ToolbarSeparatorStyle}" />
-          <Button Content="撤销 (Ctrl+Z)"
+          <Button Content="{DynamicResource Tip_Undo}"
                   Style="{StaticResource ToolbarButtonStyle}"
                   MinWidth="86"
-                  ToolTip="撤销上一步编辑"
+                  ToolTip="{DynamicResource Tip_UndoHint}"
                   Command="{Binding UndoCommand}" />
-          <Button Content="重做 (Ctrl+Y)"
+          <Button Content="{DynamicResource Tip_Redo}"
                   Style="{StaticResource ToolbarButtonStyle}"
                   MinWidth="86"
-                  ToolTip="重做被撤销的编辑"
+                  ToolTip="{DynamicResource Tip_RedoHint}"
                   Command="{Binding RedoCommand}" />
           <Rectangle Style="{StaticResource ToolbarSeparatorStyle}" />
-          <ToggleButton Content="抓手 (Space)"
+          <ToggleButton Content="{DynamicResource Tip_HandTool}"
                         Style="{StaticResource ToolbarToggleButtonStyle}"
                         IsChecked="{Binding IsHandToolActive, Mode=OneWay}"
                         IsEnabled="{Binding HasDocument}" />
@@ -175,11 +187,11 @@
 
         <!-- 右侧：视图缩放 -->
         <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
-          <RadioButton Content="适应窗口"
+          <RadioButton Content="{DynamicResource Tip_FitToWindow}"
                        Style="{StaticResource ModeRadioStyle}"
                        IsChecked="{Binding IsFitToWindow, Mode=OneWay}"
                        Command="{Binding FitToWindowCommand}" />
-          <RadioButton Content="原始大小"
+          <RadioButton Content="{DynamicResource Tip_ActualSize}"
                        Style="{StaticResource ModeRadioStyle}"
                        IsChecked="{Binding IsActualSize, Mode=OneWay}"
                        Command="{Binding ActualSizeCommand}" />
@@ -187,12 +199,12 @@
           <Button Content="－"
                   Style="{StaticResource ToolbarButtonStyle}"
                   MinWidth="34"
-                  ToolTip="缩小 (Ctrl+-)"
+                  ToolTip="{DynamicResource Tip_ZoomOut}"
                   Command="{Binding ZoomOutCommand}" />
           <Button Content="＋"
                   Style="{StaticResource ToolbarButtonStyle}"
                   MinWidth="34"
-                  ToolTip="放大 (Ctrl++)"
+                  ToolTip="{DynamicResource Tip_ZoomIn}"
                   Command="{Binding ZoomInCommand}" />
         </StackPanel>
       </DockPanel>
@@ -263,7 +275,7 @@
                   </Button>
 
                   <Button Content="✕"
-                          ToolTip="关闭这个标签页"
+                          ToolTip="{DynamicResource Tip_CloseTab}"
                           MinWidth="0" Padding="4,4" Margin="0" Cursor="Hand"
                           FontSize="10"
                           Command="{Binding DataContext.CloseTabCommand, RelativeSource={RelativeSource AncestorType=ItemsControl}}"
@@ -310,7 +322,7 @@
       <Grid.ColumnDefinitions>
         <ColumnDefinition Width="*" MinWidth="240" />
         <ColumnDefinition Width="Auto" />
-        <ColumnDefinition Width="296" MinWidth="220" />
+        <ColumnDefinition x:Name="EditorPanelColumn" Width="296" MinWidth="220" />
       </Grid.ColumnDefinitions>
 
       <!-- 左侧：画布 -->
@@ -582,16 +594,16 @@
               Background="Transparent"
               Visibility="{Binding HasDocument, Converter={StaticResource BoolToVisibility}, ConverterParameter=invert}">
         <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center">
-          <TextBlock Text="把图片拖到这里，或点击“打开”"
+          <TextBlock Text="{DynamicResource Empty_DropHint}"
                      FontSize="18"
                      Foreground="{DynamicResource SubtleForegroundBrush}"
                      HorizontalAlignment="Center" />
-          <TextBlock Text="支持 JPG / PNG / BMP / TIFF / GIF"
+          <TextBlock Text="{DynamicResource Empty_SupportedFormats}"
                      FontSize="13"
                      Margin="0,10,0,0"
                      Foreground="{DynamicResource SubtleForegroundBrush}"
                      HorizontalAlignment="Center" />
-          <Button Content="打开图片 (Ctrl+O)"
+          <Button Content="{DynamicResource Empty_OpenButton}"
                   Style="{StaticResource ToolbarButtonStyle}"
                   Margin="0,22,0,0"
                   Padding="18,8"
@@ -605,7 +617,7 @@
               Visibility="{Binding IsBusy, Converter={StaticResource BoolToVisibility}}">
         <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center">
           <ProgressBar IsIndeterminate="True" Width="220" Height="6" />
-          <TextBlock Text="正在处理，请稍候…"
+          <TextBlock Text="{DynamicResource Empty_Busy}"
                      Margin="0,14,0,0"
                      Foreground="White"
                      HorizontalAlignment="Center" />
@@ -633,15 +645,15 @@
                     FontSize="12">
 
           <!-- ==================== 调整 ==================== -->
-          <TabItem Header="调整">
+          <TabItem Header="{DynamicResource Adjust_Header}">
             <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
               <StackPanel Margin="14,12">
-                <TextBlock Text="拖动即时预览，松手后按全分辨率应用"
+                <TextBlock Text="{DynamicResource Adjust_Hint}"
                            FontSize="11" TextWrapping="Wrap"
                            Foreground="{DynamicResource SubtleForegroundBrush}" />
 
                 <DockPanel Margin="0,14,0,0" LastChildFill="False">
-                  <TextBlock DockPanel.Dock="Left" Text="亮度" Style="{StaticResource StatusLabelStyle}" Margin="0" />
+                  <TextBlock DockPanel.Dock="Left" Text="{DynamicResource Adjust_Brightness}" Style="{StaticResource StatusLabelStyle}" Margin="0" />
                   <TextBlock DockPanel.Dock="Right" MinWidth="34" TextAlignment="Right"
                              Style="{StaticResource StatusTextStyle}" Margin="0"
                              Text="{Binding Brightness, StringFormat={}{0:0}}" />
@@ -651,7 +663,7 @@
                         Value="{Binding Brightness, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged, Delay=40}" />
 
                 <DockPanel Margin="0,12,0,0" LastChildFill="False">
-                  <TextBlock DockPanel.Dock="Left" Text="对比度" Style="{StaticResource StatusLabelStyle}" Margin="0" />
+                  <TextBlock DockPanel.Dock="Left" Text="{DynamicResource Adjust_Contrast}" Style="{StaticResource StatusLabelStyle}" Margin="0" />
                   <TextBlock DockPanel.Dock="Right" MinWidth="34" TextAlignment="Right"
                              Style="{StaticResource StatusTextStyle}" Margin="0"
                              Text="{Binding Contrast, StringFormat={}{0:0}}" />
@@ -661,7 +673,7 @@
                         Value="{Binding Contrast, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged, Delay=40}" />
 
                 <DockPanel Margin="0,12,0,0" LastChildFill="False">
-                  <TextBlock DockPanel.Dock="Left" Text="饱和度" Style="{StaticResource StatusLabelStyle}" Margin="0" />
+                  <TextBlock DockPanel.Dock="Left" Text="{DynamicResource Adjust_Saturation}" Style="{StaticResource StatusLabelStyle}" Margin="0" />
                   <TextBlock DockPanel.Dock="Right" MinWidth="34" TextAlignment="Right"
                              Style="{StaticResource StatusTextStyle}" Margin="0"
                              Text="{Binding Saturation, StringFormat={}{0:0}}" />
@@ -671,7 +683,7 @@
                         Value="{Binding Saturation, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged, Delay=40}" />
 
                 <DockPanel Margin="0,12,0,0" LastChildFill="False">
-                  <TextBlock DockPanel.Dock="Left" Text="色温" Style="{StaticResource StatusLabelStyle}" Margin="0" />
+                  <TextBlock DockPanel.Dock="Left" Text="{DynamicResource Adjust_Temperature}" Style="{StaticResource StatusLabelStyle}" Margin="0" />
                   <TextBlock DockPanel.Dock="Right" MinWidth="34" TextAlignment="Right"
                              Style="{StaticResource StatusTextStyle}" Margin="0"
                              Text="{Binding Temperature, StringFormat={}{0:0}}" />
@@ -680,32 +692,32 @@
                         IsEnabled="{Binding HasDocument}"
                         Value="{Binding Temperature, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged, Delay=40}" />
                 <DockPanel Margin="0,2,0,0" LastChildFill="False">
-                  <TextBlock DockPanel.Dock="Left" Text="偏冷" Style="{StaticResource StatusLabelStyle}" Margin="0" FontSize="10" />
-                  <TextBlock DockPanel.Dock="Right" Text="偏暖" Style="{StaticResource StatusLabelStyle}" Margin="0" FontSize="10" />
+                  <TextBlock DockPanel.Dock="Left" Text="{DynamicResource Adjust_Cool}" Style="{StaticResource StatusLabelStyle}" Margin="0" FontSize="10" />
+                  <TextBlock DockPanel.Dock="Right" Text="{DynamicResource Adjust_Warm}" Style="{StaticResource StatusLabelStyle}" Margin="0" FontSize="10" />
                 </DockPanel>
 
                 <TextBlock Text="{Binding AdjustmentsText}" Margin="0,14,0,0" FontSize="11" TextWrapping="Wrap"
                            Foreground="{DynamicResource SubtleForegroundBrush}" />
 
-                <Button Content="复位为原图" Style="{StaticResource ToolbarButtonStyle}"
+                <Button Content="{DynamicResource Adjust_Reset}" Style="{StaticResource ToolbarButtonStyle}"
                         Margin="0,10,0,0" HorizontalAlignment="Left"
                         Command="{Binding ResetAdjustmentsCommand}" />
 
                 <Rectangle Height="1" Margin="0,16" Fill="{DynamicResource BorderBrush}" />
 
-                <TextBlock Text="历史记录" FontSize="14" FontWeight="SemiBold"
+                <TextBlock Text="{DynamicResource Adjust_History}" FontSize="14" FontWeight="SemiBold"
                            Foreground="{DynamicResource ChromeForegroundBrush}" />
                 <TextBlock Text="{Binding HistoryText}" Margin="0,6,0,0" FontSize="11" TextWrapping="Wrap"
                            Foreground="{DynamicResource SubtleForegroundBrush}" />
-                <TextBlock Text="压缩快照保存，可回退 30 步" Margin="0,4,0,0" FontSize="11" TextWrapping="Wrap"
+                <TextBlock Text="{DynamicResource Adjust_HistoryHint}" Margin="0,4,0,0" FontSize="11" TextWrapping="Wrap"
                            Foreground="{DynamicResource SubtleForegroundBrush}" />
 
                 <StackPanel Orientation="Horizontal" Margin="0,10,0,0">
-                  <Button Content="撤销" Style="{StaticResource ToolbarButtonStyle}" Command="{Binding UndoCommand}" />
-                  <Button Content="重做" Style="{StaticResource ToolbarButtonStyle}" Command="{Binding RedoCommand}" />
+                  <Button Content="{DynamicResource Adjust_Undo}" Style="{StaticResource ToolbarButtonStyle}" Command="{Binding UndoCommand}" />
+                  <Button Content="{DynamicResource Adjust_Redo}" Style="{StaticResource ToolbarButtonStyle}" Command="{Binding RedoCommand}" />
                 </StackPanel>
 
-                <TextBlock Text="正在应用调整…" Margin="0,12,0,0" FontSize="11"
+                <TextBlock Text="{DynamicResource Adjust_Applying}" Margin="0,12,0,0" FontSize="11"
                            Foreground="{DynamicResource AccentBrush}"
                            Visibility="{Binding IsRendering, Converter={StaticResource BoolToVisibility}}" />
               </StackPanel>
@@ -713,21 +725,21 @@
           </TabItem>
 
           <!-- ==================== 滤镜 ==================== -->
-          <TabItem Header="滤镜">
+          <TabItem Header="{DynamicResource Filter_Header}">
             <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
               <StackPanel Margin="14,12">
 
-                <TextBlock Text="一键滤镜" FontSize="14" FontWeight="SemiBold"
+                <TextBlock Text="{DynamicResource Filter_Quick}" FontSize="14" FontWeight="SemiBold"
                            Foreground="{DynamicResource ChromeForegroundBrush}" />
                 <StackPanel Orientation="Horizontal" Margin="0,8,0,0">
-                  <Button Content="反色" MinWidth="64" Style="{StaticResource ToolbarButtonStyle}"
+                  <Button Content="{DynamicResource Filter_Invert}" MinWidth="64" Style="{StaticResource ToolbarButtonStyle}"
                           Command="{Binding InvertCommand}" />
-                  <Button Content="灰度" MinWidth="64" Style="{StaticResource ToolbarButtonStyle}"
+                  <Button Content="{DynamicResource Filter_Grayscale}" MinWidth="64" Style="{StaticResource ToolbarButtonStyle}"
                           Command="{Binding GrayscaleCommand}" />
                 </StackPanel>
 
                 <DockPanel Margin="0,14,0,0" LastChildFill="False">
-                  <TextBlock DockPanel.Dock="Left" Text="二值化阈值" Style="{StaticResource StatusLabelStyle}" Margin="0" />
+                  <TextBlock DockPanel.Dock="Left" Text="{DynamicResource Filter_Threshold}" Style="{StaticResource StatusLabelStyle}" Margin="0" />
                   <TextBlock DockPanel.Dock="Right" MinWidth="34" TextAlignment="Right"
                              Style="{StaticResource StatusTextStyle}" Margin="0"
                              Text="{Binding Threshold}" />
@@ -735,17 +747,17 @@
                 <Slider Minimum="0" Maximum="255" TickFrequency="16" SmallChange="1" LargeChange="16"
                         IsEnabled="{Binding HasDocument}"
                         Value="{Binding Threshold, Mode=TwoWay}" />
-                <Button Content="应用二值化" Style="{StaticResource ToolbarButtonStyle}"
+                <Button Content="{DynamicResource Filter_ApplyThreshold}" Style="{StaticResource ToolbarButtonStyle}"
                         Margin="0,6,0,0" HorizontalAlignment="Left"
                         Command="{Binding ThresholdCommand}" />
 
                 <Rectangle Height="1" Margin="0,14" Fill="{DynamicResource BorderBrush}" />
 
-                <TextBlock Text="模糊与锐化" FontSize="14" FontWeight="SemiBold"
+                <TextBlock Text="{DynamicResource Filter_BlurSharpen}" FontSize="14" FontWeight="SemiBold"
                            Foreground="{DynamicResource ChromeForegroundBrush}" />
 
                 <DockPanel Margin="0,8,0,0" LastChildFill="False">
-                  <TextBlock DockPanel.Dock="Left" Text="模糊半径" Style="{StaticResource StatusLabelStyle}" Margin="0" />
+                  <TextBlock DockPanel.Dock="Left" Text="{DynamicResource Filter_BlurRadius}" Style="{StaticResource StatusLabelStyle}" Margin="0" />
                   <TextBlock DockPanel.Dock="Right" MinWidth="40" TextAlignment="Right"
                              Style="{StaticResource StatusTextStyle}" Margin="0"
                              Text="{Binding BlurRadius, StringFormat={}{0:0} px}" />
@@ -753,12 +765,12 @@
                 <Slider Minimum="0" Maximum="100" TickFrequency="5" SmallChange="0.5" LargeChange="5"
                         IsEnabled="{Binding HasDocument}"
                         Value="{Binding BlurRadius, Mode=TwoWay}" />
-                <Button Content="高斯模糊" Style="{StaticResource ToolbarButtonStyle}"
+                <Button Content="{DynamicResource Filter_GaussianBlur}" Style="{StaticResource ToolbarButtonStyle}"
                         Margin="0,6,0,0" HorizontalAlignment="Left"
                         Command="{Binding BlurCommand}" />
 
                 <DockPanel Margin="0,12,0,0" LastChildFill="False">
-                  <TextBlock DockPanel.Dock="Left" Text="锐化强度" Style="{StaticResource StatusLabelStyle}" Margin="0" />
+                  <TextBlock DockPanel.Dock="Left" Text="{DynamicResource Filter_SharpenAmount}" Style="{StaticResource StatusLabelStyle}" Margin="0" />
                   <TextBlock DockPanel.Dock="Right" MinWidth="40" TextAlignment="Right"
                              Style="{StaticResource StatusTextStyle}" Margin="0"
                              Text="{Binding SharpenAmount, StringFormat={}{0:0}%}" />
@@ -768,7 +780,7 @@
                         Value="{Binding SharpenAmount, Mode=TwoWay}" />
 
                 <DockPanel Margin="0,10,0,0" LastChildFill="False">
-                  <TextBlock DockPanel.Dock="Left" Text="锐化半径" Style="{StaticResource StatusLabelStyle}" Margin="0" />
+                  <TextBlock DockPanel.Dock="Left" Text="{DynamicResource Filter_SharpenRadius}" Style="{StaticResource StatusLabelStyle}" Margin="0" />
                   <TextBlock DockPanel.Dock="Right" MinWidth="40" TextAlignment="Right"
                              Style="{StaticResource StatusTextStyle}" Margin="0"
                              Text="{Binding SharpenRadius, StringFormat={}{0:0.#} px}" />
@@ -778,7 +790,7 @@
                         Value="{Binding SharpenRadius, Mode=TwoWay}" />
 
                 <DockPanel Margin="0,10,0,0" LastChildFill="False">
-                  <TextBlock DockPanel.Dock="Left" Text="锐化阈值" Style="{StaticResource StatusLabelStyle}" Margin="0" />
+                  <TextBlock DockPanel.Dock="Left" Text="{DynamicResource Filter_SharpenThreshold}" Style="{StaticResource StatusLabelStyle}" Margin="0" />
                   <TextBlock DockPanel.Dock="Right" MinWidth="34" TextAlignment="Right"
                              Style="{StaticResource StatusTextStyle}" Margin="0"
                              Text="{Binding SharpenThreshold}" />
@@ -786,40 +798,40 @@
                 <Slider Minimum="0" Maximum="64" TickFrequency="2" SmallChange="1" LargeChange="4"
                         IsEnabled="{Binding HasDocument}"
                         Value="{Binding SharpenThreshold, Mode=TwoWay}" />
-                <Button Content="USM 锐化" Style="{StaticResource ToolbarButtonStyle}"
+                <Button Content="{DynamicResource Filter_UnsharpMask}" Style="{StaticResource ToolbarButtonStyle}"
                         Margin="0,6,0,0" HorizontalAlignment="Left"
                         Command="{Binding SharpenCommand}" />
 
                 <Rectangle Height="1" Margin="0,14" Fill="{DynamicResource BorderBrush}" />
 
-                <TextBlock Text="旋转与翻转" FontSize="14" FontWeight="SemiBold"
+                <TextBlock Text="{DynamicResource Geometry_RotateFlip}" FontSize="14" FontWeight="SemiBold"
                            Foreground="{DynamicResource ChromeForegroundBrush}" />
                 <WrapPanel Margin="0,8,0,0">
-                  <Button Content="↺ 逆时针" Style="{StaticResource ToolbarButtonStyle}"
+                  <Button Content="{DynamicResource Geometry_RotateCcw}" Style="{StaticResource ToolbarButtonStyle}"
                           Command="{Binding RotateCounterClockwiseCommand}" />
-                  <Button Content="↻ 顺时针" Style="{StaticResource ToolbarButtonStyle}"
+                  <Button Content="{DynamicResource Geometry_RotateCw}" Style="{StaticResource ToolbarButtonStyle}"
                           Command="{Binding RotateClockwiseCommand}" />
                   <Button Content="180°" Style="{StaticResource ToolbarButtonStyle}"
                           Command="{Binding Rotate180Command}" />
-                  <Button Content="水平翻转" Style="{StaticResource ToolbarButtonStyle}"
+                  <Button Content="{DynamicResource Geometry_FlipHorizontal}" Style="{StaticResource ToolbarButtonStyle}"
                           Command="{Binding FlipHorizontalCommand}" />
-                  <Button Content="垂直翻转" Style="{StaticResource ToolbarButtonStyle}"
+                  <Button Content="{DynamicResource Geometry_FlipVertical}" Style="{StaticResource ToolbarButtonStyle}"
                           Command="{Binding FlipVerticalCommand}" />
                 </WrapPanel>
 
                 <Rectangle Height="1" Margin="0,14" Fill="{DynamicResource BorderBrush}" />
 
-                <TextBlock Text="裁剪" FontSize="14" FontWeight="SemiBold"
+                <TextBlock Text="{DynamicResource Crop_Header}" FontSize="14" FontWeight="SemiBold"
                            Foreground="{DynamicResource ChromeForegroundBrush}" />
-                <TextBlock Text="进入后在画布上拖动边框，内置三分线辅助"
+                <TextBlock Text="{DynamicResource Crop_Hint}"
                            Margin="0,4,0,0" FontSize="11" TextWrapping="Wrap"
                            Foreground="{DynamicResource SubtleForegroundBrush}" />
                 <StackPanel Orientation="Horizontal" Margin="0,8,0,0">
-                  <Button Content="开始裁剪" Style="{StaticResource ToolbarButtonStyle}"
+                  <Button Content="{DynamicResource Crop_Begin}" Style="{StaticResource ToolbarButtonStyle}"
                           Command="{Binding BeginCropCommand}" />
-                  <Button Content="应用裁剪" Style="{StaticResource ToolbarButtonStyle}"
+                  <Button Content="{DynamicResource Crop_Apply}" Style="{StaticResource ToolbarButtonStyle}"
                           Command="{Binding ApplyCropCommand}" />
-                  <Button Content="取消" Style="{StaticResource ToolbarButtonStyle}"
+                  <Button Content="{DynamicResource Common_Cancel}" Style="{StaticResource ToolbarButtonStyle}"
                           Command="{Binding CancelCropCommand}" />
                 </StackPanel>
                 <TextBlock Text="{Binding CropInfoText}" Margin="0,8,0,0" FontSize="11" TextWrapping="Wrap"
@@ -829,23 +841,23 @@
           </TabItem>
 
           <!-- ==================== 边框与文字 ==================== -->
-          <TabItem Header="边框文字">
+          <TabItem Header="{DynamicResource BorderText_Header}">
             <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
               <StackPanel Margin="14,12">
 
-                <TextBlock Text="边框" FontSize="14" FontWeight="SemiBold"
+                <TextBlock Text="{DynamicResource Border_Header}" FontSize="14" FontWeight="SemiBold"
                            Foreground="{DynamicResource ChromeForegroundBrush}" />
 
-                <TextBlock Text="样式" Margin="0,8,0,0" Style="{StaticResource StatusLabelStyle}" />
+                <TextBlock Text="{DynamicResource Batch_Style}" Margin="0,8,0,0" Style="{StaticResource StatusLabelStyle}" />
                 <ComboBox SelectedIndex="{Binding BorderStyleIndex, Mode=TwoWay}"
                           IsEnabled="{Binding HasDocument}">
-                  <ComboBoxItem Content="实线边框" />
-                  <ComboBoxItem Content="内衬相框" />
-                  <ComboBoxItem Content="柔和阴影" />
+                  <ComboBoxItem Content="{DynamicResource Border_Plain}" />
+                  <ComboBoxItem Content="{DynamicResource Border_InnerFrame}" />
+                  <ComboBoxItem Content="{DynamicResource Border_SoftShadow}" />
                 </ComboBox>
 
                 <DockPanel Margin="0,12,0,0" LastChildFill="False">
-                  <TextBlock DockPanel.Dock="Left" Text="边框宽度" Style="{StaticResource StatusLabelStyle}" Margin="0" />
+                  <TextBlock DockPanel.Dock="Left" Text="{DynamicResource Border_Width}" Style="{StaticResource StatusLabelStyle}" Margin="0" />
                   <TextBlock DockPanel.Dock="Right" MinWidth="40" TextAlignment="Right"
                              Style="{StaticResource StatusTextStyle}" Margin="0"
                              Text="{Binding BorderWidth, StringFormat={}{0} px}" />
@@ -854,38 +866,38 @@
                         IsEnabled="{Binding HasDocument}"
                         Value="{Binding BorderWidth, Mode=TwoWay}" />
 
-                <TextBlock Text="颜色" Margin="0,12,0,0" Style="{StaticResource StatusLabelStyle}" />
+                <TextBlock Text="{DynamicResource Annotation_Color}" Margin="0,12,0,0" Style="{StaticResource StatusLabelStyle}" />
                 <WrapPanel Margin="0,4,0,0">
-                  <Button Content="白色" Style="{StaticResource ToolbarButtonStyle}" Click="OnBorderColorWhite" />
-                  <Button Content="黑色" Style="{StaticResource ToolbarButtonStyle}" Click="OnBorderColorBlack" />
-                  <Button Content="浅灰" Style="{StaticResource ToolbarButtonStyle}" Click="OnBorderColorGray" />
-                  <Button Content="米色" Style="{StaticResource ToolbarButtonStyle}" Click="OnBorderColorCream" />
+                  <Button Content="{DynamicResource Common_White}" Style="{StaticResource ToolbarButtonStyle}" Click="OnBorderColorWhite" />
+                  <Button Content="{DynamicResource Common_Black}" Style="{StaticResource ToolbarButtonStyle}" Click="OnBorderColorBlack" />
+                  <Button Content="{DynamicResource Border_LightGray}" Style="{StaticResource ToolbarButtonStyle}" Click="OnBorderColorGray" />
+                  <Button Content="{DynamicResource Border_Beige}" Style="{StaticResource ToolbarButtonStyle}" Click="OnBorderColorCream" />
                 </WrapPanel>
-                <TextBlock Text="当前颜色" Margin="0,8,0,0" FontSize="11"
+                <TextBlock Text="{DynamicResource Border_CurrentColor}" Margin="0,8,0,0" FontSize="11"
                            Foreground="{DynamicResource SubtleForegroundBrush}" />
                 <Rectangle Height="20" Margin="0,4,0,0" RadiusX="3" RadiusY="3"
                            Fill="{Binding BorderColorBrush}"
                            Stroke="{DynamicResource BorderBrush}" />
 
-                <Button Content="添加边框" Style="{StaticResource ToolbarButtonStyle}"
+                <Button Content="{DynamicResource Border_Apply}" Style="{StaticResource ToolbarButtonStyle}"
                         Margin="0,10,0,0" HorizontalAlignment="Left"
                         Command="{Binding ApplyBorderCommand}" />
 
                 <Rectangle Height="1" Margin="0,16" Fill="{DynamicResource BorderBrush}" />
 
-                <TextBlock Text="文字" FontSize="14" FontWeight="SemiBold"
+                <TextBlock Text="{DynamicResource Text_Content}" FontSize="14" FontWeight="SemiBold"
                            Foreground="{DynamicResource ChromeForegroundBrush}" />
 
-                <TextBlock Text="内容" Margin="0,8,0,0" Style="{StaticResource StatusLabelStyle}" />
+                <TextBlock Text="{DynamicResource Text_Header}" Margin="0,8,0,0" Style="{StaticResource StatusLabelStyle}" />
                 <TextBox Text="{Binding TextContent, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
                          IsEnabled="{Binding HasDocument}" />
 
-                <TextBlock Text="字体" Margin="0,10,0,0" Style="{StaticResource StatusLabelStyle}" />
+                <TextBlock Text="{DynamicResource Text_Font}" Margin="0,10,0,0" Style="{StaticResource StatusLabelStyle}" />
                 <TextBox Text="{Binding TextFontFamily, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
                          IsEnabled="{Binding HasDocument}" />
 
                 <DockPanel Margin="0,10,0,0" LastChildFill="False">
-                  <TextBlock DockPanel.Dock="Left" Text="字号" Style="{StaticResource StatusLabelStyle}" Margin="0" />
+                  <TextBlock DockPanel.Dock="Left" Text="{DynamicResource Text_Size}" Style="{StaticResource StatusLabelStyle}" Margin="0" />
                   <TextBlock DockPanel.Dock="Right" MinWidth="40" TextAlignment="Right"
                              Style="{StaticResource StatusTextStyle}" Margin="0"
                              Text="{Binding TextFontSize, StringFormat={}{0:0} px}" />
@@ -894,40 +906,77 @@
                         IsEnabled="{Binding HasDocument}"
                         Value="{Binding TextFontSize, Mode=TwoWay}" />
 
-                <TextBlock Text="位置" Margin="0,10,0,0" Style="{StaticResource StatusLabelStyle}" />
-                <ComboBox SelectedIndex="{Binding TextAnchorIndex, Mode=TwoWay}"
+                <StackPanel Visibility="{Binding IsTextTiled, Converter={StaticResource BoolToVisibility}, ConverterParameter=invert}">
+                  <TextBlock Text="{DynamicResource Text_Position}" Margin="0,10,0,0" Style="{StaticResource StatusLabelStyle}" />
+                  <ComboBox SelectedIndex="{Binding TextAnchorIndex, Mode=TwoWay}"
+                            IsEnabled="{Binding HasDocument}">
+                    <ComboBoxItem Content="{DynamicResource Anchor_TopLeft}" />
+                    <ComboBoxItem Content="{DynamicResource Anchor_TopCenter}" />
+                    <ComboBoxItem Content="{DynamicResource Anchor_TopRight}" />
+                    <ComboBoxItem Content="{DynamicResource Anchor_MiddleLeft}" />
+                    <ComboBoxItem Content="{DynamicResource Anchor_Center}" />
+                    <ComboBoxItem Content="{DynamicResource Anchor_MiddleRight}" />
+                    <ComboBoxItem Content="{DynamicResource Anchor_BottomLeft}" />
+                    <ComboBoxItem Content="{DynamicResource Anchor_BottomCenter}" />
+                    <ComboBoxItem Content="{DynamicResource Anchor_BottomRight}" />
+                  </ComboBox>
+                </StackPanel>
+
+                <TextBlock Text="{DynamicResource Text_Layout}" Margin="0,10,0,0" Style="{StaticResource StatusLabelStyle}" />
+                <ComboBox SelectedIndex="{Binding TextLayoutIndex, Mode=TwoWay}"
                           IsEnabled="{Binding HasDocument}">
-                  <ComboBoxItem Content="左上" />
-                  <ComboBoxItem Content="上中" />
-                  <ComboBoxItem Content="右上" />
-                  <ComboBoxItem Content="左中" />
-                  <ComboBoxItem Content="居中" />
-                  <ComboBoxItem Content="右中" />
-                  <ComboBoxItem Content="左下" />
-                  <ComboBoxItem Content="下中" />
-                  <ComboBoxItem Content="右下" />
+                  <ComboBoxItem Content="{DynamicResource Text_LayoutSingle}" />
+                  <ComboBoxItem Content="{DynamicResource Text_LayoutTile}" />
                 </ComboBox>
 
+                <StackPanel Visibility="{Binding IsTextTiled, Converter={StaticResource BoolToVisibility}}">
+                  <Grid Margin="0,8,0,0">
+                    <Grid.ColumnDefinitions>
+                      <ColumnDefinition Width="*" />
+                      <ColumnDefinition Width="8" />
+                      <ColumnDefinition Width="*" />
+                    </Grid.ColumnDefinitions>
+                    <StackPanel Grid.Column="0">
+                      <TextBlock Text="{DynamicResource Text_TileSpacingX}" Style="{StaticResource StatusLabelStyle}" />
+                      <TextBox Text="{Binding TextTileSpacingX, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+                    </StackPanel>
+                    <StackPanel Grid.Column="2">
+                      <TextBlock Text="{DynamicResource Text_TileSpacingY}" Style="{StaticResource StatusLabelStyle}" />
+                      <TextBox Text="{Binding TextTileSpacingY, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+                    </StackPanel>
+                  </Grid>
+
+                  <DockPanel Margin="0,8,0,0" LastChildFill="False">
+                    <TextBlock DockPanel.Dock="Left" Text="{DynamicResource Text_TileAngle}" Style="{StaticResource StatusLabelStyle}" Margin="0" />
+                    <TextBlock DockPanel.Dock="Right" MinWidth="46" TextAlignment="Right"
+                               Style="{StaticResource StatusTextStyle}" Margin="0"
+                               Text="{Binding TextTileAngle, StringFormat={}{0:0}°}" />
+                  </DockPanel>
+                  <Slider Minimum="-75" Maximum="75" TickFrequency="5" SmallChange="1" LargeChange="5"
+                          IsEnabled="{Binding HasDocument}"
+                          Value="{Binding TextTileAngle, Mode=TwoWay}" />
+                </StackPanel>
+
                 <StackPanel Orientation="Horizontal" Margin="0,10,0,0">
-                  <CheckBox Content="加粗" IsChecked="{Binding TextBold, Mode=TwoWay}"
+                  <CheckBox Content="{DynamicResource Text_Bold}" IsChecked="{Binding TextBold, Mode=TwoWay}"
                             IsEnabled="{Binding HasDocument}"
                             Foreground="{DynamicResource ChromeForegroundBrush}" />
-                  <CheckBox Content="斜体" Margin="12,0,0,0" IsChecked="{Binding TextItalic, Mode=TwoWay}"
+                  <CheckBox Content="{DynamicResource Text_Italic}" Margin="12,0,0,0" IsChecked="{Binding TextItalic, Mode=TwoWay}"
                             IsEnabled="{Binding HasDocument}"
                             Foreground="{DynamicResource ChromeForegroundBrush}" />
-                  <CheckBox Content="投影" Margin="12,0,0,0" IsChecked="{Binding TextShadow, Mode=TwoWay}"
+                  <CheckBox Content="{DynamicResource Text_Shadow}" Margin="12,0,0,0" IsChecked="{Binding TextShadow, Mode=TwoWay}"
                             IsEnabled="{Binding HasDocument}"
                             Foreground="{DynamicResource ChromeForegroundBrush}" />
                 </StackPanel>
 
                 <WrapPanel Margin="0,10,0,0">
-                  <Button Content="白色" Style="{StaticResource ToolbarButtonStyle}" Click="OnTextColorWhite" />
-                  <Button Content="黑色" Style="{StaticResource ToolbarButtonStyle}" Click="OnTextColorBlack" />
-                  <Button Content="黄色" Style="{StaticResource ToolbarButtonStyle}" Click="OnTextColorYellow" />
-                  <Button Content="红色" Style="{StaticResource ToolbarButtonStyle}" Click="OnTextColorRed" />
+                  <Button Content="{DynamicResource Common_White}" Style="{StaticResource ToolbarButtonStyle}" Click="OnTextColorWhite" />
+                  <Button Content="{DynamicResource Common_Black}" Style="{StaticResource ToolbarButtonStyle}" Click="OnTextColorBlack" />
+                  <Button Content="{DynamicResource Common_Yellow}" Style="{StaticResource ToolbarButtonStyle}" Click="OnTextColorYellow" />
+                  <Button Content="{DynamicResource Common_Red}" Style="{StaticResource ToolbarButtonStyle}" Click="OnTextColorRed" />
                 </WrapPanel>
 
-                <Button Content="添加文字" Style="{StaticResource ToolbarButtonStyle}"
+                <Button Content="{DynamicResource Text_Apply}" Style="{StaticResource ToolbarButtonStyle}"
                         Margin="0,12,0,0" HorizontalAlignment="Left"
                         Command="{Binding ApplyTextCommand}" />
               </StackPanel>
@@ -935,21 +984,21 @@
           </TabItem>
 
           <!-- ==================== 尺寸 ==================== -->
-          <TabItem Header="尺寸">
+          <TabItem Header="{DynamicResource Resize_Size}">
             <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
               <StackPanel Margin="14,12">
 
-                <TextBlock Text="图像大小" FontSize="14" FontWeight="SemiBold"
+                <TextBlock Text="{DynamicResource Resize_Header}" FontSize="14" FontWeight="SemiBold"
                            Foreground="{DynamicResource ChromeForegroundBrush}" />
                 <TextBlock Text="{Binding ResizeOriginalText}" Margin="0,6,0,0" FontSize="11" TextWrapping="Wrap"
                            Foreground="{DynamicResource SubtleForegroundBrush}" />
 
-                <TextBlock Text="单位" Margin="0,12,0,0" Style="{StaticResource StatusLabelStyle}" />
+                <TextBlock Text="{DynamicResource Resize_Unit}" Margin="0,12,0,0" Style="{StaticResource StatusLabelStyle}" />
                 <ComboBox SelectedIndex="{Binding ResizeUnitIndex, Mode=TwoWay}"
                           IsEnabled="{Binding HasDocument}">
-                  <ComboBoxItem Content="像素 (px)" />
-                  <ComboBoxItem Content="百分比 (%)" />
-                  <ComboBoxItem Content="厘米 (cm，按图片 DPI)" />
+                  <ComboBoxItem Content="{DynamicResource Resize_UnitPixels}" />
+                  <ComboBoxItem Content="{DynamicResource Resize_UnitPercent}" />
+                  <ComboBoxItem Content="{DynamicResource Resize_UnitCm}" />
                 </ComboBox>
 
                 <Grid Margin="0,10,0,0">
@@ -959,25 +1008,25 @@
                     <ColumnDefinition Width="*" />
                   </Grid.ColumnDefinitions>
                   <StackPanel Grid.Column="0">
-                    <TextBlock Text="宽度" Style="{StaticResource StatusLabelStyle}" />
+                    <TextBlock Text="{DynamicResource Resize_Width}" Style="{StaticResource StatusLabelStyle}" />
                     <TextBox Text="{Binding ResizeTargetWidth, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
                              IsEnabled="{Binding HasDocument}" />
                   </StackPanel>
                   <TextBlock Grid.Column="1" Text="×" Margin="8,18,8,0"
                              Foreground="{DynamicResource SubtleForegroundBrush}" />
                   <StackPanel Grid.Column="2">
-                    <TextBlock Text="高度" Style="{StaticResource StatusLabelStyle}" />
+                    <TextBlock Text="{DynamicResource Resize_Height}" Style="{StaticResource StatusLabelStyle}" />
                     <TextBox Text="{Binding ResizeTargetHeight, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
                              IsEnabled="{Binding HasDocument}" />
                   </StackPanel>
                 </Grid>
 
-                <CheckBox Content="锁定宽高比" Margin="0,10,0,0"
+                <CheckBox Content="{DynamicResource Resize_LockAspect}" Margin="0,10,0,0"
                           IsChecked="{Binding LockAspectRatio, Mode=TwoWay}"
                           IsEnabled="{Binding HasDocument}"
                           Foreground="{DynamicResource ChromeForegroundBrush}" />
 
-                <TextBlock Text="快捷比例" Margin="0,10,0,0" Style="{StaticResource StatusLabelStyle}" />
+                <TextBlock Text="{DynamicResource Resize_Presets}" Margin="0,10,0,0" Style="{StaticResource StatusLabelStyle}" />
                 <WrapPanel Margin="0,4,0,0">
                   <Button Content="25%" MinWidth="46" Style="{StaticResource ToolbarButtonStyle}"
                           Command="{Binding ApplyResizePresetCommand}" CommandParameter="25"
@@ -993,28 +1042,28 @@
                           IsEnabled="{Binding HasDocument}" />
                 </WrapPanel>
 
-                <TextBlock Text="插值方式" Margin="0,12,0,0" Style="{StaticResource StatusLabelStyle}" />
+                <TextBlock Text="{DynamicResource Resize_Interpolation}" Margin="0,12,0,0" Style="{StaticResource StatusLabelStyle}" />
                 <ComboBox SelectedIndex="{Binding ResizeKernelIndex, Mode=TwoWay}"
                           IsEnabled="{Binding HasDocument}">
-                  <ComboBoxItem Content="三次立方（推荐）" />
-                  <ComboBoxItem Content="双线性（更快）" />
-                  <ComboBoxItem Content="邻近（保留硬边）" />
+                  <ComboBoxItem Content="{DynamicResource Resize_Cubic}" />
+                  <ComboBoxItem Content="{DynamicResource Resize_Bilinear}" />
+                  <ComboBoxItem Content="{DynamicResource Resize_Nearest}" />
                 </ComboBox>
 
                 <TextBlock Text="{Binding ResizeResultText}" Margin="0,10,0,0" FontSize="11" TextWrapping="Wrap"
                            Foreground="{DynamicResource SubtleForegroundBrush}" />
 
-                <Button Content="应用尺寸" Style="{StaticResource ToolbarButtonStyle}"
+                <Button Content="{DynamicResource Resize_Apply}" Style="{StaticResource ToolbarButtonStyle}"
                         Margin="0,10,0,0" HorizontalAlignment="Left"
                         Command="{Binding ApplyResizeCommand}" />
 
                 <Rectangle Height="1" Margin="0,16" Fill="{DynamicResource BorderBrush}" />
 
-                <TextBlock Text="任意角度旋转" FontSize="14" FontWeight="SemiBold"
+                <TextBlock Text="{DynamicResource Rotate_Header}" FontSize="14" FontWeight="SemiBold"
                            Foreground="{DynamicResource ChromeForegroundBrush}" />
 
                 <DockPanel Margin="0,10,0,0" LastChildFill="False">
-                  <TextBlock DockPanel.Dock="Left" Text="角度" Style="{StaticResource StatusLabelStyle}" Margin="0" />
+                  <TextBlock DockPanel.Dock="Left" Text="{DynamicResource Rotate_Angle}" Style="{StaticResource StatusLabelStyle}" Margin="0" />
                   <TextBlock DockPanel.Dock="Right" MinWidth="52" TextAlignment="Right"
                              Style="{StaticResource StatusTextStyle}" Margin="0"
                              Text="{Binding RotationDegrees, StringFormat={}{0:0.#}°}" />
@@ -1023,16 +1072,16 @@
                         IsEnabled="{Binding HasDocument}"
                         Value="{Binding RotationDegrees, Mode=TwoWay}" />
 
-                <TextBlock Text="空白角填充" Margin="0,12,0,0" Style="{StaticResource StatusLabelStyle}" />
+                <TextBlock Text="{DynamicResource Rotate_Fill}" Margin="0,12,0,0" Style="{StaticResource StatusLabelStyle}" />
                 <ComboBox SelectedIndex="{Binding RotationFillIndex, Mode=TwoWay}"
                           IsEnabled="{Binding HasDocument}">
-                  <ComboBoxItem Content="透明" />
-                  <ComboBoxItem Content="白色" />
-                  <ComboBoxItem Content="黑色" />
-                  <ComboBoxItem Content="灰色" />
+                  <ComboBoxItem Content="{DynamicResource Rotate_FillTransparent}" />
+                  <ComboBoxItem Content="{DynamicResource Common_White}" />
+                  <ComboBoxItem Content="{DynamicResource Common_Black}" />
+                  <ComboBoxItem Content="{DynamicResource Rotate_FillGray}" />
                 </ComboBox>
 
-                <CheckBox Content="自动裁掉空白角（保持原比例）" Margin="0,10,0,0"
+                <CheckBox Content="{DynamicResource Rotate_CropInscribed}" Margin="0,10,0,0"
                           IsChecked="{Binding RotationCropToInscribed, Mode=TwoWay}"
                           IsEnabled="{Binding HasDocument}"
                           Foreground="{DynamicResource ChromeForegroundBrush}" />
@@ -1040,7 +1089,7 @@
                 <TextBlock Text="{Binding RotationResultText}" Margin="0,10,0,0" FontSize="11" TextWrapping="Wrap"
                            Foreground="{DynamicResource SubtleForegroundBrush}" />
 
-                <Button Content="应用旋转" Style="{StaticResource ToolbarButtonStyle}"
+                <Button Content="{DynamicResource Rotate_Apply}" Style="{StaticResource ToolbarButtonStyle}"
                         Margin="0,10,0,0" HorizontalAlignment="Left"
                         Command="{Binding ApplyRotationCommand}" />
               </StackPanel>
@@ -1048,44 +1097,44 @@
           </TabItem>
 
           <!-- ==================== 修补 ==================== -->
-          <TabItem Header="修补">
+          <TabItem Header="{DynamicResource Retouch_Header}">
             <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
               <StackPanel Margin="14,12">
 
-                <TextBlock Text="修补 / 消除" FontSize="14" FontWeight="SemiBold"
+                <TextBlock Text="{DynamicResource Retouch_Title}" FontSize="14" FontWeight="SemiBold"
                            Foreground="{DynamicResource ChromeForegroundBrush}" />
 
-                <TextBlock Text="工具" Margin="0,8,0,0" Style="{StaticResource StatusLabelStyle}" />
+                <TextBlock Text="{DynamicResource Retouch_Tool}" Margin="0,8,0,0" Style="{StaticResource StatusLabelStyle}" />
                 <ComboBox SelectedIndex="{Binding RetouchToolIndex, Mode=TwoWay}"
                           IsEnabled="{Binding HasDocument}">
-                  <ComboBoxItem Content="智能填充（纯色 / 渐变背景）" />
-                  <ComboBoxItem Content="仿制图章（纹理背景手工修）" />
+                  <ComboBoxItem Content="{DynamicResource Retouch_Heal}" />
+                  <ComboBoxItem Content="{DynamicResource Retouch_Clone}" />
                 </ComboBox>
 
                 <StackPanel Orientation="Horizontal" Margin="0,12,0,0">
-                  <Button Content="进入修补模式" Style="{StaticResource ToolbarButtonStyle}"
+                  <Button Content="{DynamicResource Retouch_Enter}" Style="{StaticResource ToolbarButtonStyle}"
                           Command="{Binding BeginRetouchCommand}" />
-                  <Button Content="退出" Style="{StaticResource ToolbarButtonStyle}"
+                  <Button Content="{DynamicResource Retouch_Exit}" Style="{StaticResource ToolbarButtonStyle}"
                           Command="{Binding ExitRetouchCommand}" />
                 </StackPanel>
 
                 <TextBlock Text="{Binding RetouchInfoText}" Margin="0,12,0,0" FontSize="11" TextWrapping="Wrap"
                            Foreground="{DynamicResource SubtleForegroundBrush}" />
 
-                <Button Content="智能填充" Style="{StaticResource ToolbarButtonStyle}"
+                <Button Content="{DynamicResource Retouch_ApplyHeal}" Style="{StaticResource ToolbarButtonStyle}"
                         Margin="0,10,0,0" HorizontalAlignment="Left"
                         Command="{Binding ApplyInpaintCommand}" />
-                <Button Content="清除标记" Style="{StaticResource ToolbarButtonStyle}"
+                <Button Content="{DynamicResource Retouch_ClearMarks}" Style="{StaticResource ToolbarButtonStyle}"
                         Margin="0,8,0,0" HorizontalAlignment="Left"
                         Command="{Binding ClearRetouchMaskCommand}" />
 
                 <Rectangle Height="1" Margin="0,16" Fill="{DynamicResource BorderBrush}" />
 
-                <TextBlock Text="仿制图章" FontSize="14" FontWeight="SemiBold"
+                <TextBlock Text="{DynamicResource Retouch_CloneStamp}" FontSize="14" FontWeight="SemiBold"
                            Foreground="{DynamicResource ChromeForegroundBrush}" />
 
                 <DockPanel Margin="0,10,0,0" LastChildFill="False">
-                  <TextBlock DockPanel.Dock="Left" Text="笔刷半径" Style="{StaticResource StatusLabelStyle}" Margin="0" />
+                  <TextBlock DockPanel.Dock="Left" Text="{DynamicResource Retouch_BrushRadius}" Style="{StaticResource StatusLabelStyle}" Margin="0" />
                   <TextBlock DockPanel.Dock="Right" MinWidth="46" TextAlignment="Right"
                              Style="{StaticResource StatusTextStyle}" Margin="0"
                              Text="{Binding BrushRadius, StringFormat={}{0:0} px}" />
@@ -1095,7 +1144,7 @@
                         Value="{Binding BrushRadius, Mode=TwoWay}" />
 
                 <DockPanel Margin="0,10,0,0" LastChildFill="False">
-                  <TextBlock DockPanel.Dock="Left" Text="笔刷硬度" Style="{StaticResource StatusLabelStyle}" Margin="0" />
+                  <TextBlock DockPanel.Dock="Left" Text="{DynamicResource Retouch_BrushHardness}" Style="{StaticResource StatusLabelStyle}" Margin="0" />
                   <TextBlock DockPanel.Dock="Right" MinWidth="46" TextAlignment="Right"
                              Style="{StaticResource StatusTextStyle}" Margin="0"
                              Text="{Binding BrushHardnessPercentText}" />
@@ -1109,66 +1158,66 @@
 
                 <Rectangle Height="1" Margin="0,16" Fill="{DynamicResource BorderBrush}" />
 
-                <TextBlock Text="能力边界与操作" FontSize="14" FontWeight="SemiBold"
+                <TextBlock Text="{DynamicResource Retouch_LimitsTitle}" FontSize="14" FontWeight="SemiBold"
                            Foreground="{DynamicResource ChromeForegroundBrush}" />
                 <TextBlock Margin="0,8,0,0" FontSize="11" TextWrapping="Wrap"
                            Foreground="{DynamicResource SubtleForegroundBrush}"
-                           Text="智能填充按周围像素重建，纯色与渐变背景效果最好；纹理背景（草地、织物、人脸）会留下平滑斑块，那种情况请改用仿制图章手动取纹理。" />
-                <TextBlock Text="智能填充：进入模式 → 拖拽矩形框住要去掉的内容（可连续框选）→ 点「智能填充」" Margin="0,8,0,0" FontSize="11" TextWrapping="Wrap"
+                           Text="{DynamicResource Retouch_LimitText}" />
+                <TextBlock Text="{DynamicResource Retouch_HowHeal}" Margin="0,8,0,0" FontSize="11" TextWrapping="Wrap"
                            Foreground="{DynamicResource SubtleForegroundBrush}" />
-                <TextBlock Text="仿制图章：进入模式 → 按住 Alt 点一下取源 → 在别处拖拽涂抹" Margin="0,4,0,0" FontSize="11" TextWrapping="Wrap"
+                <TextBlock Text="{DynamicResource Retouch_HowClone}" Margin="0,4,0,0" FontSize="11" TextWrapping="Wrap"
                            Foreground="{DynamicResource SubtleForegroundBrush}" />
-                <TextBlock Text="都可以 Ctrl+Z 撤销；每笔涂抹只保存改动区域的前后像素，内存占用很小" Margin="0,8,0,0" FontSize="11" TextWrapping="Wrap"
+                <TextBlock Text="{DynamicResource Retouch_UndoHint}" Margin="0,8,0,0" FontSize="11" TextWrapping="Wrap"
                            Foreground="{DynamicResource SubtleForegroundBrush}" />
               </StackPanel>
             </ScrollViewer>
           </TabItem>
 
           <!-- ==================== 标注 ==================== -->
-          <TabItem Header="标注">
+          <TabItem Header="{DynamicResource Annotation_Tab}">
             <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
               <StackPanel Margin="14,12">
 
-                <TextBlock Text="标注（非破坏性）" FontSize="14" FontWeight="SemiBold"
+                <TextBlock Text="{DynamicResource Annotation_Title}" FontSize="14" FontWeight="SemiBold"
                            Foreground="{DynamicResource ChromeForegroundBrush}" />
                 <TextBlock Margin="0,6,0,0" FontSize="11" TextWrapping="Wrap"
                            Foreground="{DynamicResource SubtleForegroundBrush}"
-                           Text="标注以对象形式叠在画面上，随时可以选中改颜色 / 挪位置 / 删除，底图像素不动。导出或打印时才会合并进像素；执行滤镜、裁剪等破坏性操作前会自动先合并。" />
+                           Text="{DynamicResource Annotation_Intro}" />
 
-                <TextBlock Text="类型" Margin="0,12,0,0" Style="{StaticResource StatusLabelStyle}" />
+                <TextBlock Text="{DynamicResource Annotation_Type}" Margin="0,12,0,0" Style="{StaticResource StatusLabelStyle}" />
                 <ComboBox SelectedIndex="{Binding AnnotationToolIndex, Mode=TwoWay}"
                           IsEnabled="{Binding HasDocument}">
-                  <ComboBoxItem Content="箭头" />
-                  <ComboBoxItem Content="矩形" />
-                  <ComboBoxItem Content="椭圆" />
-                  <ComboBoxItem Content="序号（自动编号）" />
-                  <ComboBoxItem Content="高亮" />
-                  <ComboBoxItem Content="文字" />
-                  <ComboBoxItem Content="马赛克 / 模糊遮盖" />
+                  <ComboBoxItem Content="{DynamicResource Annotation_Arrow}" />
+                  <ComboBoxItem Content="{DynamicResource Annotation_Rectangle}" />
+                  <ComboBoxItem Content="{DynamicResource Annotation_Ellipse}" />
+                  <ComboBoxItem Content="{DynamicResource Annotation_NumberBadge}" />
+                  <ComboBoxItem Content="{DynamicResource Annotation_Highlight}" />
+                  <ComboBoxItem Content="{DynamicResource Text_Content}" />
+                  <ComboBoxItem Content="{DynamicResource Annotation_Mosaic}" />
                 </ComboBox>
 
                 <StackPanel Orientation="Horizontal" Margin="0,12,0,0">
-                  <Button Content="进入标注模式" Style="{StaticResource ToolbarButtonStyle}"
+                  <Button Content="{DynamicResource Annotation_Enter}" Style="{StaticResource ToolbarButtonStyle}"
                           Command="{Binding BeginAnnotationCommand}" />
-                  <Button Content="退出" Style="{StaticResource ToolbarButtonStyle}"
+                  <Button Content="{DynamicResource Retouch_Exit}" Style="{StaticResource ToolbarButtonStyle}"
                           Command="{Binding ExitAnnotationCommand}" />
                 </StackPanel>
 
-                <TextBlock Text="颜色" Margin="0,12,0,0" Style="{StaticResource StatusLabelStyle}" />
+                <TextBlock Text="{DynamicResource Annotation_Color}" Margin="0,12,0,0" Style="{StaticResource StatusLabelStyle}" />
                 <WrapPanel Margin="0,4,0,0">
-                  <Button Content="红色" Style="{StaticResource ToolbarButtonStyle}" Click="OnAnnotationColorRed" />
-                  <Button Content="黄色" Style="{StaticResource ToolbarButtonStyle}" Click="OnAnnotationColorYellow" />
-                  <Button Content="绿色" Style="{StaticResource ToolbarButtonStyle}" Click="OnAnnotationColorGreen" />
-                  <Button Content="蓝色" Style="{StaticResource ToolbarButtonStyle}" Click="OnAnnotationColorBlue" />
-                  <Button Content="白色" Style="{StaticResource ToolbarButtonStyle}" Click="OnAnnotationColorWhite" />
-                  <Button Content="黑色" Style="{StaticResource ToolbarButtonStyle}" Click="OnAnnotationColorBlack" />
+                  <Button Content="{DynamicResource Common_Red}" Style="{StaticResource ToolbarButtonStyle}" Click="OnAnnotationColorRed" />
+                  <Button Content="{DynamicResource Common_Yellow}" Style="{StaticResource ToolbarButtonStyle}" Click="OnAnnotationColorYellow" />
+                  <Button Content="{DynamicResource Common_Green}" Style="{StaticResource ToolbarButtonStyle}" Click="OnAnnotationColorGreen" />
+                  <Button Content="{DynamicResource Common_Blue}" Style="{StaticResource ToolbarButtonStyle}" Click="OnAnnotationColorBlue" />
+                  <Button Content="{DynamicResource Common_White}" Style="{StaticResource ToolbarButtonStyle}" Click="OnAnnotationColorWhite" />
+                  <Button Content="{DynamicResource Common_Black}" Style="{StaticResource ToolbarButtonStyle}" Click="OnAnnotationColorBlack" />
                 </WrapPanel>
                 <Rectangle Height="20" Margin="0,6,0,0" RadiusX="3" RadiusY="3"
                            Fill="{Binding AnnotationColorBrush}"
                            Stroke="{DynamicResource BorderBrush}" />
 
                 <DockPanel Margin="0,10,0,0" LastChildFill="False">
-                  <TextBlock DockPanel.Dock="Left" Text="线宽" Style="{StaticResource StatusLabelStyle}" Margin="0" />
+                  <TextBlock DockPanel.Dock="Left" Text="{DynamicResource Annotation_StrokeWidth}" Style="{StaticResource StatusLabelStyle}" Margin="0" />
                   <TextBlock DockPanel.Dock="Right" MinWidth="46" TextAlignment="Right"
                              Style="{StaticResource StatusTextStyle}" Margin="0"
                              Text="{Binding AnnotationStrokeWidth, StringFormat={}{0:0} px}" />
@@ -1178,7 +1227,7 @@
                         Value="{Binding AnnotationStrokeWidth, Mode=TwoWay}" />
 
                 <DockPanel Margin="0,10,0,0" LastChildFill="False">
-                  <TextBlock DockPanel.Dock="Left" Text="字号（文字 / 序号）" Style="{StaticResource StatusLabelStyle}" Margin="0" />
+                  <TextBlock DockPanel.Dock="Left" Text="{DynamicResource Annotation_FontSize}" Style="{StaticResource StatusLabelStyle}" Margin="0" />
                   <TextBlock DockPanel.Dock="Right" MinWidth="46" TextAlignment="Right"
                              Style="{StaticResource StatusTextStyle}" Margin="0"
                              Text="{Binding AnnotationFontSize, StringFormat={}{0:0} px}" />
@@ -1187,20 +1236,20 @@
                         IsEnabled="{Binding HasDocument}"
                         Value="{Binding AnnotationFontSize, Mode=TwoWay}" />
 
-                <TextBlock Text="文字内容" Margin="0,10,0,0" Style="{StaticResource StatusLabelStyle}" />
+                <TextBlock Text="{DynamicResource Annotation_TextContent}" Margin="0,10,0,0" Style="{StaticResource StatusLabelStyle}" />
                 <TextBox Text="{Binding AnnotationText, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
                          IsEnabled="{Binding HasDocument}" />
 
                 <!-- 遮盖参数：当前工具是遮盖，或选中了一个遮盖标注时显示 -->
                 <StackPanel Visibility="{Binding ShowCoverControls, Converter={StaticResource BoolToVisibility}}">
-                  <TextBlock Text="遮盖方式" Margin="0,10,0,0" Style="{StaticResource StatusLabelStyle}" />
+                  <TextBlock Text="{DynamicResource Annotation_CoverStyle}" Margin="0,10,0,0" Style="{StaticResource StatusLabelStyle}" />
                   <ComboBox SelectedIndex="{Binding AnnotationMosaicStyleIndex, Mode=TwoWay}">
-                    <ComboBoxItem Content="马赛克（块平均，适合文字 / 号码）" />
-                    <ComboBoxItem Content="模糊（适合人脸 / 背景）" />
+                    <ComboBoxItem Content="{DynamicResource Annotation_CoverPixelate}" />
+                    <ComboBoxItem Content="{DynamicResource Annotation_CoverBlur}" />
                   </ComboBox>
 
                   <DockPanel Margin="0,10,0,0" LastChildFill="False">
-                    <TextBlock DockPanel.Dock="Left" Text="强度" Style="{StaticResource StatusLabelStyle}" Margin="0" />
+                    <TextBlock DockPanel.Dock="Left" Text="{DynamicResource Annotation_CoverStrength}" Style="{StaticResource StatusLabelStyle}" Margin="0" />
                     <TextBlock DockPanel.Dock="Right" MinWidth="86" TextAlignment="Right"
                                Style="{StaticResource StatusTextStyle}" Margin="0"
                                Text="{Binding AnnotationCoverText}" />
@@ -1210,72 +1259,72 @@
                           Value="{Binding AnnotationCoverSize, Mode=TwoWay}" />
                   <TextBlock Margin="0,2,0,0" FontSize="11" TextWrapping="Wrap"
                              Foreground="{DynamicResource SubtleForegroundBrush}"
-                             Text="块 / 半径越大遮得越彻底。马赛克块锚定在图像坐标网格上，所以拖动标注时方块不会“流动”。" />
+                             Text="{DynamicResource Annotation_CoverHint}" />
                 </StackPanel>
 
                 <TextBlock Text="{Binding SelectedAnnotationInfoText}" Margin="0,12,0,0" FontSize="11" TextWrapping="Wrap"
                            Foreground="{DynamicResource SubtleForegroundBrush}" />
 
                 <StackPanel Orientation="Horizontal" Margin="0,10,0,0">
-                  <Button Content="删除选中" Style="{StaticResource ToolbarButtonStyle}"
+                  <Button Content="{DynamicResource Annotation_Delete}" Style="{StaticResource ToolbarButtonStyle}"
                           Command="{Binding DeleteSelectedAnnotationCommand}" />
-                  <Button Content="清空全部" Style="{StaticResource ToolbarButtonStyle}"
+                  <Button Content="{DynamicResource Annotation_ClearAll}" Style="{StaticResource ToolbarButtonStyle}"
                           Command="{Binding ClearAnnotationsCommand}" />
                 </StackPanel>
 
-                <Button Content="合并到画面" Style="{StaticResource ToolbarButtonStyle}"
+                <Button Content="{DynamicResource Annotation_Flatten}" Style="{StaticResource ToolbarButtonStyle}"
                         Margin="0,10,0,0" HorizontalAlignment="Left"
                         Command="{Binding FlattenAnnotationsCommand}" />
 
                 <Rectangle Height="1" Margin="0,16" Fill="{DynamicResource BorderBrush}" />
 
-                <TextBlock Text="操作" FontSize="14" FontWeight="SemiBold"
+                <TextBlock Text="{DynamicResource Annotation_HowTo}" FontSize="14" FontWeight="SemiBold"
                            Foreground="{DynamicResource ChromeForegroundBrush}" />
-                <TextBlock Text="1. 点「进入标注模式」，选择类型" Margin="0,8,0,0" FontSize="11" TextWrapping="Wrap"
+                <TextBlock Text="{DynamicResource Annotation_Step1}" Margin="0,8,0,0" FontSize="11" TextWrapping="Wrap"
                            Foreground="{DynamicResource SubtleForegroundBrush}" />
-                <TextBlock Text="2. 在画布上拖拽绘制；序号 / 文字点一下即可落点" Margin="0,4,0,0" FontSize="11" TextWrapping="Wrap"
+                <TextBlock Text="{DynamicResource Annotation_Step2}" Margin="0,4,0,0" FontSize="11" TextWrapping="Wrap"
                            Foreground="{DynamicResource SubtleForegroundBrush}" />
-                <TextBlock Text="3. 点击已有标注即可选中，改颜色 / 线宽 / 字号会立即生效，拖动可挪位" Margin="0,4,0,0" FontSize="11" TextWrapping="Wrap"
+                <TextBlock Text="{DynamicResource Annotation_Step3}" Margin="0,4,0,0" FontSize="11" TextWrapping="Wrap"
                            Foreground="{DynamicResource SubtleForegroundBrush}" />
-                <TextBlock Text="4. 选中后四周会出现 8 个白色手柄：拖手柄改尺寸（Shift 保持宽高比，Alt 以中心为基准）。文字标注拖角是改字号" Margin="0,4,0,0" FontSize="11" TextWrapping="Wrap"
+                <TextBlock Text="{DynamicResource Annotation_Step4}" Margin="0,4,0,0" FontSize="11" TextWrapping="Wrap"
                            Foreground="{DynamicResource SubtleForegroundBrush}" />
-                <TextBlock Text="5. 遮盖（马赛克 / 模糊）的内容取自底图，拖动时实时重算；导出或合并时才会真正写进像素" Margin="0,4,0,0" FontSize="11" TextWrapping="Wrap"
+                <TextBlock Text="{DynamicResource Annotation_Step5}" Margin="0,4,0,0" FontSize="11" TextWrapping="Wrap"
                            Foreground="{DynamicResource SubtleForegroundBrush}" />
-                <TextBlock Text="每一步都可 Ctrl+Z 撤销（历史里存的是对象列表快照，非常省内存）" Margin="0,8,0,0" FontSize="11" TextWrapping="Wrap"
+                <TextBlock Text="{DynamicResource Annotation_UndoHint}" Margin="0,8,0,0" FontSize="11" TextWrapping="Wrap"
                            Foreground="{DynamicResource SubtleForegroundBrush}" />
               </StackPanel>
             </ScrollViewer>
           </TabItem>
 
           <!-- ==================== 打印 ==================== -->
-          <TabItem Header="打印">
+          <TabItem Header="{DynamicResource Print_Tab}">
             <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
               <StackPanel Margin="14,12">
 
-                <TextBlock Text="打印当前图片" FontSize="14" FontWeight="SemiBold"
+                <TextBlock Text="{DynamicResource Print_PrintCurrent}" FontSize="14" FontWeight="SemiBold"
                            Foreground="{DynamicResource ChromeForegroundBrush}" />
-                <TextBlock Text="打印输出使用图片原始 DPI，不会因屏幕缩放而模糊"
+                <TextBlock Text="{DynamicResource Print_DpiHint}"
                            Margin="0,4,0,0" FontSize="11" TextWrapping="Wrap"
                            Foreground="{DynamicResource SubtleForegroundBrush}" />
                 <StackPanel Orientation="Horizontal" Margin="0,10,0,0">
-                  <Button Content="打印预览…" MinWidth="92" Style="{StaticResource ToolbarButtonStyle}"
+                  <Button Content="{DynamicResource Print_Preview}" MinWidth="92" Style="{StaticResource ToolbarButtonStyle}"
                           Command="{Binding PrintPreviewCommand}" />
-                  <Button Content="直接打印" MinWidth="82" Style="{StaticResource ToolbarButtonStyle}"
+                  <Button Content="{DynamicResource Print_Direct}" MinWidth="82" Style="{StaticResource ToolbarButtonStyle}"
                           Command="{Binding PrintCommand}" />
                 </StackPanel>
 
                 <Rectangle Height="1" Margin="0,16" Fill="{DynamicResource BorderBrush}" />
 
-                <TextBlock Text="批量打印" FontSize="14" FontWeight="SemiBold"
+                <TextBlock Text="{DynamicResource Print_Batch}" FontSize="14" FontWeight="SemiBold"
                            Foreground="{DynamicResource ChromeForegroundBrush}" />
-                <TextBlock Text="队列中的图片会依次送到打印机；每张一个打印作业，互不影响"
+                <TextBlock Text="{DynamicResource Print_QueueHint}"
                            Margin="0,4,0,0" FontSize="11" TextWrapping="Wrap"
                            Foreground="{DynamicResource SubtleForegroundBrush}" />
 
                 <StackPanel Orientation="Horizontal" Margin="0,10,0,0">
-                  <Button Content="加入当前图" MinWidth="86" Style="{StaticResource ToolbarButtonStyle}"
+                  <Button Content="{DynamicResource Print_AddCurrent}" MinWidth="86" Style="{StaticResource ToolbarButtonStyle}"
                           Command="{Binding AddCurrentToBatchCommand}" />
-                  <Button Content="添加文件…" MinWidth="86" Style="{StaticResource ToolbarButtonStyle}"
+                  <Button Content="{DynamicResource Batch_AddFiles}" MinWidth="86" Style="{StaticResource ToolbarButtonStyle}"
                           Command="{Binding AddFilesToBatchCommand}" />
                 </StackPanel>
 
@@ -1287,12 +1336,12 @@
                          IsEnabled="{Binding IsBatchPrinting, Converter={StaticResource BoolToVisibility}, ConverterParameter=invert}" />
 
                 <StackPanel Orientation="Horizontal" Margin="0,8,0,0">
-                  <Button Content="移除选中" MinWidth="82" Style="{StaticResource ToolbarButtonStyle}"
+                  <Button Content="{DynamicResource Batch_RemoveSelected}" MinWidth="82" Style="{StaticResource ToolbarButtonStyle}"
                           Command="{Binding RemoveBatchItemCommand}"
                           CommandParameter="{Binding SelectedItem, ElementName=BatchList}" />
-                  <Button Content="清空" MinWidth="60" Style="{StaticResource ToolbarButtonStyle}"
+                  <Button Content="{DynamicResource Batch_Clear}" MinWidth="60" Style="{StaticResource ToolbarButtonStyle}"
                           Command="{Binding ClearBatchCommand}" />
-                  <Button Content="开始打印" MinWidth="86" Style="{StaticResource ToolbarButtonStyle}"
+                  <Button Content="{DynamicResource Print_Start}" MinWidth="86" Style="{StaticResource ToolbarButtonStyle}"
                           Command="{Binding StartBatchPrintCommand}" />
                 </StackPanel>
 
@@ -1308,29 +1357,29 @@
           </TabItem>
 
           <!-- ==================== 批量流水线 ==================== -->
-          <TabItem Header="批量">
+          <TabItem Header="{DynamicResource Batch_Tab}">
             <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
               <StackPanel Margin="14,12">
 
-                <TextBlock Text="批量流水线" FontSize="14" FontWeight="SemiBold"
+                <TextBlock Text="{DynamicResource Batch_Title}" FontSize="14" FontWeight="SemiBold"
                            Foreground="{DynamicResource ChromeForegroundBrush}" />
-                <TextBlock Text="一套参数套到多张图上，导出为新文件；原文件不会被改动"
+                <TextBlock Text="{DynamicResource Batch_Intro}"
                            Margin="0,4,0,0" FontSize="11" TextWrapping="Wrap"
                            Foreground="{DynamicResource SubtleForegroundBrush}" />
 
                 <!-- ===== 1. 来源 ===== -->
-                <TextBlock Text="1. 待处理的图片" Margin="0,14,0,0" Style="{StaticResource StatusLabelStyle}" />
+                <TextBlock Text="{DynamicResource Batch_SourceTitle}" Margin="0,14,0,0" Style="{StaticResource StatusLabelStyle}" />
 
                 <WrapPanel Margin="0,4,0,0">
-                  <Button Content="添加文件…" MinWidth="80" Style="{StaticResource ToolbarButtonStyle}"
+                  <Button Content="{DynamicResource Batch_AddFiles}" MinWidth="80" Style="{StaticResource ToolbarButtonStyle}"
                           Command="{Binding AddBatchFilesCommand}" />
-                  <Button Content="添加文件夹…" MinWidth="86" Style="{StaticResource ToolbarButtonStyle}"
+                  <Button Content="{DynamicResource Batch_AddFolder}" MinWidth="86" Style="{StaticResource ToolbarButtonStyle}"
                           Command="{Binding AddBatchFolderCommand}" />
-                  <Button Content="加上当前图" MinWidth="80" Style="{StaticResource ToolbarButtonStyle}"
+                  <Button Content="{DynamicResource Batch_AddCurrent}" MinWidth="80" Style="{StaticResource ToolbarButtonStyle}"
                           Command="{Binding AddCurrentBatchItemCommand}" />
                 </WrapPanel>
 
-                <CheckBox Content="添加文件夹时包含子文件夹" Margin="0,6,0,0"
+                <CheckBox Content="{DynamicResource Batch_IncludeSubfolders}" Margin="0,6,0,0"
                           IsChecked="{Binding BatchIncludeSubfolders, Mode=TwoWay}"
                           Foreground="{DynamicResource ChromeForegroundBrush}" />
 
@@ -1355,23 +1404,23 @@
                 </ListBox>
 
                 <WrapPanel Margin="0,6,0,0">
-                  <Button Content="移除选中" MinWidth="74" Style="{StaticResource ToolbarButtonStyle}"
+                  <Button Content="{DynamicResource Batch_RemoveSelected}" MinWidth="74" Style="{StaticResource ToolbarButtonStyle}"
                           Command="{Binding RemoveBatchQueueItemCommand}"
                           CommandParameter="{Binding SelectedItem, ElementName=BatchQueueList}" />
-                  <Button Content="清空队列" MinWidth="74" Style="{StaticResource ToolbarButtonStyle}"
+                  <Button Content="{DynamicResource Batch_ClearQueue}" MinWidth="74" Style="{StaticResource ToolbarButtonStyle}"
                           Command="{Binding ClearBatchQueueCommand}" />
                 </WrapPanel>
 
                 <Rectangle Height="1" Margin="0,14" Fill="{DynamicResource BorderBrush}" />
 
                 <!-- ===== 2. 流水线步骤 ===== -->
-                <TextBlock Text="2. 流水线（自上而下依次执行）" Style="{StaticResource StatusLabelStyle}" />
-                <TextBlock Text="顺序会影响结果：先加水印再缩放，水印会跟着一起变小"
+                <TextBlock Text="{DynamicResource Batch_PipelineTitle}" Style="{StaticResource StatusLabelStyle}" />
+                <TextBlock Text="{DynamicResource Batch_OrderHint}"
                            Margin="0,4,0,0" FontSize="11" TextWrapping="Wrap"
                            Foreground="{DynamicResource SubtleForegroundBrush}" />
 
                 <DockPanel Margin="0,6,0,0" LastChildFill="True">
-                  <Button DockPanel.Dock="Right" Content="添加" MinWidth="54" Margin="6,0,0,0"
+                  <Button DockPanel.Dock="Right" Content="{DynamicResource Batch_Add}" MinWidth="54" Margin="6,0,0,0"
                           Style="{StaticResource ToolbarButtonStyle}"
                           Command="{Binding AddBatchStepCommand}" />
                   <ComboBox ItemsSource="{Binding BatchStepKindOptions}"
@@ -1399,13 +1448,13 @@
                 </ListBox>
 
                 <WrapPanel Margin="0,6,0,0">
-                  <Button Content="上移" MinWidth="52" Style="{StaticResource ToolbarButtonStyle}"
+                  <Button Content="{DynamicResource Batch_MoveUp}" MinWidth="52" Style="{StaticResource ToolbarButtonStyle}"
                           Command="{Binding MoveBatchStepUpCommand}" />
-                  <Button Content="下移" MinWidth="52" Style="{StaticResource ToolbarButtonStyle}"
+                  <Button Content="{DynamicResource Batch_MoveDown}" MinWidth="52" Style="{StaticResource ToolbarButtonStyle}"
                           Command="{Binding MoveBatchStepDownCommand}" />
-                  <Button Content="移除" MinWidth="52" Style="{StaticResource ToolbarButtonStyle}"
+                  <Button Content="{DynamicResource Batch_Remove}" MinWidth="52" Style="{StaticResource ToolbarButtonStyle}"
                           Command="{Binding RemoveBatchStepCommand}" />
-                  <Button Content="清空" MinWidth="52" Style="{StaticResource ToolbarButtonStyle}"
+                  <Button Content="{DynamicResource Batch_Clear}" MinWidth="52" Style="{StaticResource ToolbarButtonStyle}"
                           Command="{Binding ClearBatchStepsCommand}" />
                 </WrapPanel>
 
@@ -1417,20 +1466,20 @@
                         BorderBrush="{DynamicResource BorderBrush}">
                   <StackPanel>
 
-                    <TextBlock Text="选中「流水线」里的一步，即可在这里改它的参数"
+                    <TextBlock Text="{DynamicResource Batch_SelectStepHint}"
                                FontSize="11" TextWrapping="Wrap"
                                Foreground="{DynamicResource SubtleForegroundBrush}"
                                Visibility="{Binding HasSelectedBatchStep, Converter={StaticResource BoolToVisibility}, ConverterParameter=invert}" />
 
                     <!-- 尺寸缩放 -->
                     <StackPanel Visibility="{Binding IsResizeStepSelected, Converter={StaticResource BoolToVisibility}}">
-                      <TextBlock Text="约束方式" Style="{StaticResource StatusLabelStyle}" />
+                      <TextBlock Text="{DynamicResource Batch_ConstraintMode}" Style="{StaticResource StatusLabelStyle}" />
                       <ComboBox SelectedValue="{Binding BatchResizeMode, Mode=TwoWay}" SelectedValuePath="Tag">
-                        <ComboBoxItem Content="约束长边" Tag="{x:Static batch:BatchResizeMode.LongEdge}" />
-                        <ComboBoxItem Content="约束宽度" Tag="{x:Static batch:BatchResizeMode.FitWidth}" />
-                        <ComboBoxItem Content="约束高度" Tag="{x:Static batch:BatchResizeMode.FitHeight}" />
-                        <ComboBoxItem Content="精确宽高（不保持比例）" Tag="{x:Static batch:BatchResizeMode.Exact}" />
-                        <ComboBoxItem Content="百分比" Tag="{x:Static batch:BatchResizeMode.Percent}" />
+                        <ComboBoxItem Content="{DynamicResource Batch_ConstrainLongEdge}" Tag="{x:Static batch:BatchResizeMode.LongEdge}" />
+                        <ComboBoxItem Content="{DynamicResource Batch_ConstrainWidth}" Tag="{x:Static batch:BatchResizeMode.FitWidth}" />
+                        <ComboBoxItem Content="{DynamicResource Batch_ConstrainHeight}" Tag="{x:Static batch:BatchResizeMode.FitHeight}" />
+                        <ComboBoxItem Content="{DynamicResource Batch_ExactSize}" Tag="{x:Static batch:BatchResizeMode.Exact}" />
+                        <ComboBoxItem Content="{DynamicResource Batch_Percent}" Tag="{x:Static batch:BatchResizeMode.Percent}" />
                       </ComboBox>
 
                       <Grid Margin="0,8,0,0">
@@ -1440,11 +1489,11 @@
                           <ColumnDefinition Width="*" />
                         </Grid.ColumnDefinitions>
                         <StackPanel Grid.Column="0">
-                          <TextBlock Text="长边 / 宽 / 高 / 百分比" Style="{StaticResource StatusLabelStyle}" />
+                          <TextBlock Text="{DynamicResource Batch_ConstraintOptions}" Style="{StaticResource StatusLabelStyle}" />
                           <TextBox Text="{Binding BatchResizeValue, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
                         </StackPanel>
                         <StackPanel Grid.Column="2">
-                          <TextBlock Text="精确宽 × 高" Style="{StaticResource StatusLabelStyle}" />
+                          <TextBlock Text="{DynamicResource Batch_ExactSizeLabel}" Style="{StaticResource StatusLabelStyle}" />
                           <StackPanel Orientation="Horizontal">
                             <TextBox Width="58"
                                      Text="{Binding BatchResizeWidth, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
@@ -1456,14 +1505,14 @@
                         </StackPanel>
                       </Grid>
 
-                      <TextBlock Text="插值方式" Margin="0,8,0,0" Style="{StaticResource StatusLabelStyle}" />
+                      <TextBlock Text="{DynamicResource Resize_Interpolation}" Margin="0,8,0,0" Style="{StaticResource StatusLabelStyle}" />
                       <ComboBox SelectedValue="{Binding BatchResizeKernel, Mode=TwoWay}" SelectedValuePath="Tag">
-                        <ComboBoxItem Content="三次立方（推荐）" Tag="{x:Static filters:ResampleKernel.Bicubic}" />
-                        <ComboBoxItem Content="双线性（更快）" Tag="{x:Static filters:ResampleKernel.Bilinear}" />
-                        <ComboBoxItem Content="邻近（保留硬边）" Tag="{x:Static filters:ResampleKernel.NearestNeighbor}" />
+                        <ComboBoxItem Content="{DynamicResource Resize_Cubic}" Tag="{x:Static filters:ResampleKernel.Bicubic}" />
+                        <ComboBoxItem Content="{DynamicResource Resize_Bilinear}" Tag="{x:Static filters:ResampleKernel.Bilinear}" />
+                        <ComboBoxItem Content="{DynamicResource Resize_Nearest}" Tag="{x:Static filters:ResampleKernel.NearestNeighbor}" />
                       </ComboBox>
 
-                      <CheckBox Content="只缩不放（小图保持原样）" Margin="0,8,0,0"
+                      <CheckBox Content="{DynamicResource Batch_OnlyShrink}" Margin="0,8,0,0"
                                 IsChecked="{Binding BatchResizeOnlyShrink, Mode=TwoWay}"
                                 Foreground="{DynamicResource ChromeForegroundBrush}" />
                     </StackPanel>
@@ -1471,7 +1520,7 @@
                     <!-- 基础调整 -->
                     <StackPanel Visibility="{Binding IsAdjustmentStepSelected, Converter={StaticResource BoolToVisibility}}">
                       <DockPanel LastChildFill="False">
-                        <TextBlock DockPanel.Dock="Left" Text="亮度" Style="{StaticResource StatusLabelStyle}" Margin="0" />
+                        <TextBlock DockPanel.Dock="Left" Text="{DynamicResource Adjust_Brightness}" Style="{StaticResource StatusLabelStyle}" Margin="0" />
                         <TextBlock DockPanel.Dock="Right" MinWidth="46" TextAlignment="Right"
                                    Style="{StaticResource StatusTextStyle}" Margin="0"
                                    Text="{Binding BatchAdjustBrightness, StringFormat={}{0:+0;-0;0}}" />
@@ -1480,7 +1529,7 @@
                               Value="{Binding BatchAdjustBrightness, Mode=TwoWay}" />
 
                       <DockPanel LastChildFill="False" Margin="0,6,0,0">
-                        <TextBlock DockPanel.Dock="Left" Text="对比度" Style="{StaticResource StatusLabelStyle}" Margin="0" />
+                        <TextBlock DockPanel.Dock="Left" Text="{DynamicResource Adjust_Contrast}" Style="{StaticResource StatusLabelStyle}" Margin="0" />
                         <TextBlock DockPanel.Dock="Right" MinWidth="46" TextAlignment="Right"
                                    Style="{StaticResource StatusTextStyle}" Margin="0"
                                    Text="{Binding BatchAdjustContrast, StringFormat={}{0:+0;-0;0}}" />
@@ -1489,7 +1538,7 @@
                               Value="{Binding BatchAdjustContrast, Mode=TwoWay}" />
 
                       <DockPanel LastChildFill="False" Margin="0,6,0,0">
-                        <TextBlock DockPanel.Dock="Left" Text="饱和度" Style="{StaticResource StatusLabelStyle}" Margin="0" />
+                        <TextBlock DockPanel.Dock="Left" Text="{DynamicResource Adjust_Saturation}" Style="{StaticResource StatusLabelStyle}" Margin="0" />
                         <TextBlock DockPanel.Dock="Right" MinWidth="46" TextAlignment="Right"
                                    Style="{StaticResource StatusTextStyle}" Margin="0"
                                    Text="{Binding BatchAdjustSaturation, StringFormat={}{0:+0;-0;0}}" />
@@ -1498,7 +1547,7 @@
                               Value="{Binding BatchAdjustSaturation, Mode=TwoWay}" />
 
                       <DockPanel LastChildFill="False" Margin="0,6,0,0">
-                        <TextBlock DockPanel.Dock="Left" Text="色温" Style="{StaticResource StatusLabelStyle}" Margin="0" />
+                        <TextBlock DockPanel.Dock="Left" Text="{DynamicResource Adjust_Temperature}" Style="{StaticResource StatusLabelStyle}" Margin="0" />
                         <TextBlock DockPanel.Dock="Right" MinWidth="46" TextAlignment="Right"
                                    Style="{StaticResource StatusTextStyle}" Margin="0"
                                    Text="{Binding BatchAdjustTemperature, StringFormat={}{0:+0;-0;0}}" />
@@ -1509,60 +1558,60 @@
 
                     <!-- 翻转旋转 -->
                     <StackPanel Visibility="{Binding IsFlipRotateStepSelected, Converter={StaticResource BoolToVisibility}}">
-                      <TextBlock Text="旋转（顺时针，无损）" Style="{StaticResource StatusLabelStyle}" />
+                      <TextBlock Text="{DynamicResource Batch_RotateCw}" Style="{StaticResource StatusLabelStyle}" />
                       <ComboBox SelectedValue="{Binding BatchRotateAngle, Mode=TwoWay}" SelectedValuePath="Tag">
-                        <ComboBoxItem Content="不旋转" Tag="{x:Static filters:RotationAngle.None}" />
-                        <ComboBoxItem Content="顺时针 90°" Tag="{x:Static filters:RotationAngle.Clockwise90}" />
-                        <ComboBoxItem Content="旋转 180°" Tag="{x:Static filters:RotationAngle.Clockwise180}" />
-                        <ComboBoxItem Content="顺时针 270°" Tag="{x:Static filters:RotationAngle.Clockwise270}" />
+                        <ComboBoxItem Content="{DynamicResource Batch_RotateNone}" Tag="{x:Static filters:RotationAngle.None}" />
+                        <ComboBoxItem Content="{DynamicResource Batch_Rotate90}" Tag="{x:Static filters:RotationAngle.Clockwise90}" />
+                        <ComboBoxItem Content="{DynamicResource Batch_Rotate180}" Tag="{x:Static filters:RotationAngle.Clockwise180}" />
+                        <ComboBoxItem Content="{DynamicResource Batch_Rotate270}" Tag="{x:Static filters:RotationAngle.Clockwise270}" />
                       </ComboBox>
 
-                      <CheckBox Content="左右翻转" Margin="0,8,0,0"
+                      <CheckBox Content="{DynamicResource Batch_FlipHorizontal}" Margin="0,8,0,0"
                                 IsChecked="{Binding BatchFlipHorizontal, Mode=TwoWay}"
                                 Foreground="{DynamicResource ChromeForegroundBrush}" />
-                      <CheckBox Content="上下翻转" Margin="0,6,0,0"
+                      <CheckBox Content="{DynamicResource Batch_FlipVertical}" Margin="0,6,0,0"
                                 IsChecked="{Binding BatchFlipVertical, Mode=TwoWay}"
                                 Foreground="{DynamicResource ChromeForegroundBrush}" />
                     </StackPanel>
 
                     <!-- 边框 -->
                     <StackPanel Visibility="{Binding IsBorderStepSelected, Converter={StaticResource BoolToVisibility}}">
-                      <TextBlock Text="样式" Style="{StaticResource StatusLabelStyle}" />
+                      <TextBlock Text="{DynamicResource Batch_Style}" Style="{StaticResource StatusLabelStyle}" />
                       <ComboBox SelectedValue="{Binding BatchBorderStyle, Mode=TwoWay}" SelectedValuePath="Tag">
-                        <ComboBoxItem Content="实线" Tag="{x:Static filters:BorderStyle.Solid}" />
-                        <ComboBoxItem Content="内白外黑" Tag="{x:Static filters:BorderStyle.InnerLine}" />
-                        <ComboBoxItem Content="柔和阴影" Tag="{x:Static filters:BorderStyle.Shadow}" />
+                        <ComboBoxItem Content="{DynamicResource Batch_BorderSolid}" Tag="{x:Static filters:BorderStyle.Solid}" />
+                        <ComboBoxItem Content="{DynamicResource Batch_BorderInset}" Tag="{x:Static filters:BorderStyle.InnerLine}" />
+                        <ComboBoxItem Content="{DynamicResource Border_SoftShadow}" Tag="{x:Static filters:BorderStyle.Shadow}" />
                       </ComboBox>
 
-                      <TextBlock Text="宽度（像素）" Margin="0,8,0,0" Style="{StaticResource StatusLabelStyle}" />
+                      <TextBlock Text="{DynamicResource Batch_BorderWidthPx}" Margin="0,8,0,0" Style="{StaticResource StatusLabelStyle}" />
                       <TextBox Text="{Binding BatchBorderWidth, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
 
                       <TextBlock Text="{Binding BatchBorderColorText}" Margin="0,8,0,0" FontSize="11"
                                  Foreground="{DynamicResource SubtleForegroundBrush}" />
                       <WrapPanel Margin="0,4,0,0">
-                        <Button Content="白" MinWidth="34" Style="{StaticResource ToolbarButtonStyle}"
+                        <Button Content="{DynamicResource Common_WhiteShort}" MinWidth="34" Style="{StaticResource ToolbarButtonStyle}"
                                 Click="OnBatchBorderColorWhite" />
-                        <Button Content="黑" MinWidth="34" Style="{StaticResource ToolbarButtonStyle}"
+                        <Button Content="{DynamicResource Common_BlackShort}" MinWidth="34" Style="{StaticResource ToolbarButtonStyle}"
                                 Click="OnBatchBorderColorBlack" />
-                        <Button Content="米" MinWidth="34" Style="{StaticResource ToolbarButtonStyle}"
+                        <Button Content="{DynamicResource Border_BeigeShort}" MinWidth="34" Style="{StaticResource ToolbarButtonStyle}"
                                 Click="OnBatchBorderColorCream" />
-                        <Button Content="灰" MinWidth="34" Style="{StaticResource ToolbarButtonStyle}"
+                        <Button Content="{DynamicResource Common_GrayShort}" MinWidth="34" Style="{StaticResource ToolbarButtonStyle}"
                                 Click="OnBatchBorderColorGray" />
                       </WrapPanel>
                     </StackPanel>
 
                     <!-- 文字水印 -->
                     <StackPanel Visibility="{Binding IsWatermarkStepSelected, Converter={StaticResource BoolToVisibility}}">
-                      <TextBlock Text="水印文字" Style="{StaticResource StatusLabelStyle}" />
+                      <TextBlock Text="{DynamicResource Batch_WatermarkText}" Style="{StaticResource StatusLabelStyle}" />
                       <TextBox Text="{Binding BatchWatermarkText, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
 
-                      <TextBlock Text="字号计量方式" Margin="0,8,0,0" Style="{StaticResource StatusLabelStyle}" />
+                      <TextBlock Text="{DynamicResource Batch_SizeMode}" Margin="0,8,0,0" Style="{StaticResource StatusLabelStyle}" />
                       <ComboBox SelectedValue="{Binding BatchWatermarkFontSizeMode, Mode=TwoWay}" SelectedValuePath="Tag">
-                        <ComboBoxItem Content="按图像宽度百分比（推荐）"
+                        <ComboBoxItem Content="{DynamicResource Batch_SizeRelative}"
                                       Tag="{x:Static batch:WatermarkSizeMode.RelativeToWidth}" />
-                        <ComboBoxItem Content="固定像素" Tag="{x:Static batch:WatermarkSizeMode.Absolute}" />
+                        <ComboBoxItem Content="{DynamicResource Batch_SizeFixed}" Tag="{x:Static batch:WatermarkSizeMode.Absolute}" />
                       </ComboBox>
-                      <TextBlock Text="批量图的尺寸常常不一致：固定像素会让大图上水印看不见、小图上占满屏"
+                      <TextBlock Text="{DynamicResource Batch_SizeModeHint}"
                                  Margin="0,4,0,0" FontSize="11" TextWrapping="Wrap"
                                  Foreground="{DynamicResource SubtleForegroundBrush}" />
 
@@ -1573,17 +1622,17 @@
                           <ColumnDefinition Width="*" />
                         </Grid.ColumnDefinitions>
                         <StackPanel Grid.Column="0">
-                          <TextBlock Text="字号" Style="{StaticResource StatusLabelStyle}" />
+                          <TextBlock Text="{DynamicResource Text_Size}" Style="{StaticResource StatusLabelStyle}" />
                           <TextBox Text="{Binding BatchWatermarkFontSize, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
                         </StackPanel>
                         <StackPanel Grid.Column="2">
-                          <TextBlock Text="边距" Style="{StaticResource StatusLabelStyle}" />
+                          <TextBlock Text="{DynamicResource Batch_Margin}" Style="{StaticResource StatusLabelStyle}" />
                           <TextBox Text="{Binding BatchWatermarkMargin, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
                         </StackPanel>
                       </Grid>
 
                       <DockPanel LastChildFill="False" Margin="0,8,0,0">
-                        <TextBlock DockPanel.Dock="Left" Text="不透明度" Style="{StaticResource StatusLabelStyle}" Margin="0" />
+                        <TextBlock DockPanel.Dock="Left" Text="{DynamicResource Batch_Opacity}" Style="{StaticResource StatusLabelStyle}" Margin="0" />
                         <TextBlock DockPanel.Dock="Right" MinWidth="46" TextAlignment="Right"
                                    Style="{StaticResource StatusTextStyle}" Margin="0"
                                    Text="{Binding BatchWatermarkOpacity}" />
@@ -1591,38 +1640,78 @@
                       <Slider Minimum="0" Maximum="255" TickFrequency="5"
                               Value="{Binding BatchWatermarkOpacity, Mode=TwoWay}" />
 
-                      <TextBlock Text="位置" Margin="0,8,0,0" Style="{StaticResource StatusLabelStyle}" />
-                      <ComboBox SelectedValue="{Binding BatchWatermarkAnchor, Mode=TwoWay}" SelectedValuePath="Tag">
-                        <ComboBoxItem Content="左上" Tag="{x:Static filters:TextAnchor.TopLeft}" />
-                        <ComboBoxItem Content="上中" Tag="{x:Static filters:TextAnchor.TopCenter}" />
-                        <ComboBoxItem Content="右上" Tag="{x:Static filters:TextAnchor.TopRight}" />
-                        <ComboBoxItem Content="左中" Tag="{x:Static filters:TextAnchor.MiddleLeft}" />
-                        <ComboBoxItem Content="居中" Tag="{x:Static filters:TextAnchor.Center}" />
-                        <ComboBoxItem Content="右中" Tag="{x:Static filters:TextAnchor.MiddleRight}" />
-                        <ComboBoxItem Content="左下" Tag="{x:Static filters:TextAnchor.BottomLeft}" />
-                        <ComboBoxItem Content="下中" Tag="{x:Static filters:TextAnchor.BottomCenter}" />
-                        <ComboBoxItem Content="右下" Tag="{x:Static filters:TextAnchor.BottomRight}" />
+                      <StackPanel Visibility="{Binding IsBatchWatermarkTiled, Converter={StaticResource BoolToVisibility}, ConverterParameter=invert}">
+                        <TextBlock Text="{DynamicResource Text_Position}" Margin="0,8,0,0" Style="{StaticResource StatusLabelStyle}" />
+                        <ComboBox SelectedValue="{Binding BatchWatermarkAnchor, Mode=TwoWay}" SelectedValuePath="Tag">
+                          <ComboBoxItem Content="{DynamicResource Anchor_TopLeft}" Tag="{x:Static filters:TextAnchor.TopLeft}" />
+                          <ComboBoxItem Content="{DynamicResource Anchor_TopCenter}" Tag="{x:Static filters:TextAnchor.TopCenter}" />
+                          <ComboBoxItem Content="{DynamicResource Anchor_TopRight}" Tag="{x:Static filters:TextAnchor.TopRight}" />
+                          <ComboBoxItem Content="{DynamicResource Anchor_MiddleLeft}" Tag="{x:Static filters:TextAnchor.MiddleLeft}" />
+                          <ComboBoxItem Content="{DynamicResource Anchor_Center}" Tag="{x:Static filters:TextAnchor.Center}" />
+                          <ComboBoxItem Content="{DynamicResource Anchor_MiddleRight}" Tag="{x:Static filters:TextAnchor.MiddleRight}" />
+                          <ComboBoxItem Content="{DynamicResource Anchor_BottomLeft}" Tag="{x:Static filters:TextAnchor.BottomLeft}" />
+                          <ComboBoxItem Content="{DynamicResource Anchor_BottomCenter}" Tag="{x:Static filters:TextAnchor.BottomCenter}" />
+                          <ComboBoxItem Content="{DynamicResource Anchor_BottomRight}" Tag="{x:Static filters:TextAnchor.BottomRight}" />
+                        </ComboBox>
+                      </StackPanel>
+
+                      <TextBlock Text="{DynamicResource Text_Layout}" Margin="0,8,0,0" Style="{StaticResource StatusLabelStyle}" />
+                      <ComboBox SelectedIndex="{Binding BatchWatermarkLayoutIndex, Mode=TwoWay}">
+                        <ComboBoxItem Content="{DynamicResource Text_LayoutSingle}" />
+                        <ComboBoxItem Content="{DynamicResource Text_LayoutTile}" />
                       </ComboBox>
 
-                      <CheckBox Content="加粗" Margin="0,8,0,0"
+                      <!-- 平铺参数：只在平铺模式下出现 -->
+                      <StackPanel Visibility="{Binding IsBatchWatermarkTiled, Converter={StaticResource BoolToVisibility}}">
+                        <Grid Margin="0,8,0,0">
+                          <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="8" />
+                            <ColumnDefinition Width="*" />
+                          </Grid.ColumnDefinitions>
+                          <StackPanel Grid.Column="0">
+                            <TextBlock Text="{DynamicResource Text_TileSpacingX}" Style="{StaticResource StatusLabelStyle}" />
+                            <TextBox Text="{Binding BatchTileSpacingX, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+                          </StackPanel>
+                          <StackPanel Grid.Column="2">
+                            <TextBlock Text="{DynamicResource Text_TileSpacingY}" Style="{StaticResource StatusLabelStyle}" />
+                            <TextBox Text="{Binding BatchTileSpacingY, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+                          </StackPanel>
+                        </Grid>
+
+                        <DockPanel Margin="0,8,0,0" LastChildFill="False">
+                          <TextBlock DockPanel.Dock="Left" Text="{DynamicResource Text_TileAngle}" Style="{StaticResource StatusLabelStyle}" Margin="0" />
+                          <TextBlock DockPanel.Dock="Right" MinWidth="46" TextAlignment="Right"
+                                     Style="{StaticResource StatusTextStyle}" Margin="0"
+                                     Text="{Binding BatchTileAngle, StringFormat={}{0:0}°}" />
+                        </DockPanel>
+                        <Slider Minimum="-75" Maximum="75" TickFrequency="5" SmallChange="1" LargeChange="5"
+                                Value="{Binding BatchTileAngle, Mode=TwoWay}" />
+
+                        <TextBlock Margin="0,4,0,0" FontSize="11" TextWrapping="Wrap"
+                                   Foreground="{DynamicResource SubtleForegroundBrush}"
+                                   Text="{DynamicResource Batch_TileHint}" />
+                      </StackPanel>
+
+                      <CheckBox Content="{DynamicResource Text_Bold}" Margin="0,8,0,0"
                                 IsChecked="{Binding BatchWatermarkBold, Mode=TwoWay}"
                                 Foreground="{DynamicResource ChromeForegroundBrush}" />
-                      <CheckBox Content="加深色投影（浅底更清楚，深底会变脏）" Margin="0,6,0,0"
+                      <CheckBox Content="{DynamicResource Batch_ShadowHint}" Margin="0,6,0,0"
                                 IsChecked="{Binding BatchWatermarkShadow, Mode=TwoWay}"
                                 Foreground="{DynamicResource ChromeForegroundBrush}" />
 
                       <TextBlock Text="{Binding BatchWatermarkColorText}" Margin="0,8,0,0" FontSize="11"
                                  Foreground="{DynamicResource SubtleForegroundBrush}" />
                       <WrapPanel Margin="0,4,0,0">
-                        <Button Content="白" MinWidth="34" Style="{StaticResource ToolbarButtonStyle}"
+                        <Button Content="{DynamicResource Common_WhiteShort}" MinWidth="34" Style="{StaticResource ToolbarButtonStyle}"
                                 Click="OnBatchWatermarkColorWhite" />
-                        <Button Content="黑" MinWidth="34" Style="{StaticResource ToolbarButtonStyle}"
+                        <Button Content="{DynamicResource Common_BlackShort}" MinWidth="34" Style="{StaticResource ToolbarButtonStyle}"
                                 Click="OnBatchWatermarkColorBlack" />
-                        <Button Content="灰" MinWidth="34" Style="{StaticResource ToolbarButtonStyle}"
+                        <Button Content="{DynamicResource Common_GrayShort}" MinWidth="34" Style="{StaticResource ToolbarButtonStyle}"
                                 Click="OnBatchWatermarkColorGray" />
-                        <Button Content="黄" MinWidth="34" Style="{StaticResource ToolbarButtonStyle}"
+                        <Button Content="{DynamicResource Common_YellowShort}" MinWidth="34" Style="{StaticResource ToolbarButtonStyle}"
                                 Click="OnBatchWatermarkColorYellow" />
-                        <Button Content="红" MinWidth="34" Style="{StaticResource ToolbarButtonStyle}"
+                        <Button Content="{DynamicResource Common_RedShort}" MinWidth="34" Style="{StaticResource ToolbarButtonStyle}"
                                 Click="OnBatchWatermarkColorRed" />
                       </WrapPanel>
                     </StackPanel>
@@ -1633,14 +1722,14 @@
                 <Rectangle Height="1" Margin="0,14" Fill="{DynamicResource BorderBrush}" />
 
                 <!-- ===== 3. 预览 ===== -->
-                <TextBlock Text="3. 效果预览" Style="{StaticResource StatusLabelStyle}" />
+                <TextBlock Text="{DynamicResource Batch_PreviewTitle}" Style="{StaticResource StatusLabelStyle}" />
                 <Border Margin="0,6,0,0" MinHeight="88" BorderThickness="1"
                         BorderBrush="{DynamicResource BorderBrush}"
                         Background="{DynamicResource CheckerboardBrush}">
                   <Grid>
                     <Image Source="{Binding BatchPreviewImage}" Stretch="Uniform"
                            MaxHeight="210" Margin="4" />
-                    <TextBlock Text="在队列里选一张图片即可预览"
+                    <TextBlock Text="{DynamicResource Batch_PreviewHint}"
                                HorizontalAlignment="Center" VerticalAlignment="Center"
                                FontSize="11" TextWrapping="Wrap" Margin="8"
                                Foreground="{DynamicResource SubtleForegroundBrush}"
@@ -1649,29 +1738,29 @@
                 </Border>
                 <TextBlock Text="{Binding BatchPreviewText}" Margin="0,6,0,0" FontSize="11" TextWrapping="Wrap"
                            Foreground="{DynamicResource SubtleForegroundBrush}" />
-                <Button Content="刷新预览" Margin="0,6,0,0" HorizontalAlignment="Left" MinWidth="74"
+                <Button Content="{DynamicResource Batch_RefreshPreview}" Margin="0,6,0,0" HorizontalAlignment="Left" MinWidth="74"
                         Style="{StaticResource ToolbarButtonStyle}"
                         Command="{Binding RefreshBatchPreviewCommand}" />
 
                 <Rectangle Height="1" Margin="0,14" Fill="{DynamicResource BorderBrush}" />
 
                 <!-- ===== 4. 输出 ===== -->
-                <TextBlock Text="4. 输出" Style="{StaticResource StatusLabelStyle}" />
+                <TextBlock Text="{DynamicResource Batch_OutputTitle}" Style="{StaticResource StatusLabelStyle}" />
 
                 <DockPanel Margin="0,6,0,0" LastChildFill="True">
-                  <Button DockPanel.Dock="Right" Content="浏览…" MinWidth="56" Margin="6,0,0,0"
+                  <Button DockPanel.Dock="Right" Content="{DynamicResource Batch_Browse}" MinWidth="56" Margin="6,0,0,0"
                           Style="{StaticResource ToolbarButtonStyle}"
                           Command="{Binding BrowseBatchOutputDirectoryCommand}" />
                   <TextBox Text="{Binding BatchOutputDirectory, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
                 </DockPanel>
 
-                <TextBlock Text="格式" Margin="0,8,0,0" Style="{StaticResource StatusLabelStyle}" />
+                <TextBlock Text="{DynamicResource Batch_Format}" Margin="0,8,0,0" Style="{StaticResource StatusLabelStyle}" />
                 <ComboBox ItemsSource="{Binding BatchOutputFormatOptions}"
                           DisplayMemberPath="Name"
                           SelectedItem="{Binding BatchOutputFormat, Mode=TwoWay}" />
 
                 <DockPanel LastChildFill="False" Margin="0,8,0,0">
-                  <TextBlock DockPanel.Dock="Left" Text="JPEG 质量" Style="{StaticResource StatusLabelStyle}" Margin="0" />
+                  <TextBlock DockPanel.Dock="Left" Text="{DynamicResource Batch_JpegQuality}" Style="{StaticResource StatusLabelStyle}" Margin="0" />
                   <TextBlock DockPanel.Dock="Right" MinWidth="40" TextAlignment="Right"
                              Style="{StaticResource StatusTextStyle}" Margin="0"
                              Text="{Binding BatchJpegQuality}" />
@@ -1680,7 +1769,7 @@
                         IsEnabled="{Binding IsBatchQualityEnabled}"
                         Value="{Binding BatchJpegQuality, Mode=TwoWay}" />
 
-                <TextBlock Text="文件名后缀" Margin="0,8,0,0" Style="{StaticResource StatusLabelStyle}" />
+                <TextBlock Text="{DynamicResource Batch_FileNameSuffix}" Margin="0,8,0,0" Style="{StaticResource StatusLabelStyle}" />
                 <TextBox Text="{Binding BatchFileNameSuffix, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
 
                 <TextBlock Text="{Binding BatchOutputSummary}" Margin="0,8,0,0" FontSize="11" TextWrapping="Wrap"
@@ -1692,9 +1781,9 @@
 
                 <!-- ===== 5. 执行 ===== -->
                 <WrapPanel>
-                  <Button Content="开始批量处理" MinWidth="104" Style="{StaticResource ToolbarButtonStyle}"
+                  <Button Content="{DynamicResource Batch_Start}" MinWidth="104" Style="{StaticResource ToolbarButtonStyle}"
                           Command="{Binding StartBatchRunCommand}" />
-                  <Button Content="取消" MinWidth="54" Style="{StaticResource ToolbarButtonStyle}"
+                  <Button Content="{DynamicResource Common_Cancel}" MinWidth="54" Style="{StaticResource ToolbarButtonStyle}"
                           Command="{Binding CancelBatchRunCommand}" />
                 </WrapPanel>
 
@@ -1705,7 +1794,7 @@
                              Value="{Binding ProgressValue, Mode=OneWay}"
                              Visibility="{Binding IsBatchRunning, Converter={StaticResource BoolToVisibility}}" />
 
-                <TextBlock Text="批量处理只写新文件，原图不会被改动，因此没有「批量撤销」这一说 —— 重跑一次即可。"
+                <TextBlock Text="{DynamicResource Batch_NoUndo}"
                            Margin="0,10,0,0" FontSize="11" TextWrapping="Wrap"
                            Foreground="{DynamicResource SubtleForegroundBrush}" />
               </StackPanel>
@@ -1744,16 +1833,16 @@
         </StackPanel>
 
         <StackPanel Grid.Column="2" Orientation="Horizontal">
-          <TextBlock Style="{StaticResource StatusLabelStyle}" Text="尺寸" />
+          <TextBlock Style="{StaticResource StatusLabelStyle}" Text="{DynamicResource Resize_Size}" />
           <TextBlock Style="{StaticResource StatusTextStyle}" Text="{Binding PixelSizeText}" />
           <Rectangle Style="{StaticResource ToolbarSeparatorStyle}" Margin="4,5" />
           <TextBlock Style="{StaticResource StatusLabelStyle}" Text="DPI" />
           <TextBlock Style="{StaticResource StatusTextStyle}" Text="{Binding DpiText}" />
           <Rectangle Style="{StaticResource ToolbarSeparatorStyle}" Margin="4,5" />
-          <TextBlock Style="{StaticResource StatusLabelStyle}" Text="文件" />
+          <TextBlock Style="{StaticResource StatusLabelStyle}" Text="{DynamicResource Batch_File}" />
           <TextBlock Style="{StaticResource StatusTextStyle}" Text="{Binding FileSizeText}" />
           <Rectangle Style="{StaticResource ToolbarSeparatorStyle}" Margin="4,5" />
-          <TextBlock Style="{StaticResource StatusLabelStyle}" Text="缩放" />
+          <TextBlock Style="{StaticResource StatusLabelStyle}" Text="{DynamicResource Print_Scale}" />
           <TextBlock Style="{StaticResource ZoomTextStyle}" Text="{Binding ZoomPercentText}" />
           <Rectangle Style="{StaticResource ToolbarSeparatorStyle}" Margin="4,5" />
           <TextBlock Style="{StaticResource StatusLabelStyle}" Text="{Binding HistoryText}"

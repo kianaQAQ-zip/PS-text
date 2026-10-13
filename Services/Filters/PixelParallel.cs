@@ -2,6 +2,7 @@ using System;
 using System.Threading;
 using System.Threading.Tasks;
 using PSText.Infrastructure.Imaging;
+using PSText.Services;
 
 namespace PSText.Services.Filters
 {
@@ -61,7 +62,7 @@ namespace PSText.Services.Filters
             long required = (long)stride * height;
             if (output.LongLength < required)
             {
-                throw new ArgumentException("输出缓冲长度不足。", "output");
+                throw new ArgumentException(Loc.T("Pixel_ReasonBufferShort"), "output");
             }
 
             bool parallel = useParallel
@@ -118,7 +119,7 @@ namespace PSText.Services.Filters
             {
                 throw new ArgumentOutOfRangeException(
                     "source",
-                    string.Format("图像过大（需要 {0} 字节），超出单次处理上限。", required));
+                    string.Format(Loc.T("Pixel_ReasonTooLarge"), required));
             }
 
             return new byte[required];

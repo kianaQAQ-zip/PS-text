@@ -3,6 +3,7 @@ using System.Windows;
 using System.Windows.Input;
 using System.Windows.Media.Imaging;
 using PSText.Infrastructure;
+using PSText.Services;
 using PSText.Services.Printing;
 
 namespace PSText.ViewModels
@@ -67,6 +68,22 @@ namespace PSText.ViewModels
 
         /// <summary>打印机名称（显示用）。</summary>
         public string PrinterName { get; private set; }
+
+        /// <summary>
+        /// 窗口标题："打印预览 - 打印机名"。
+        ///
+        /// 放在 ViewModel 而不是 XAML 的 StringFormat 里，是为了让前缀也能跟着语言走 ——
+        /// 绑定表达式里的字符串没法交给本地化处理器。
+        /// </summary>
+        public string WindowTitleText
+        {
+            get
+            {
+                return string.IsNullOrEmpty(PrinterName)
+                    ? Loc.T("Print_PreviewTitle")
+                    : Loc.T("Print_PreviewTitleWithPrinter", PrinterName);
+            }
+        }
 
         /// <summary>纸张尺寸（DIP）。</summary>
         public Size PaperSizeDips
@@ -259,16 +276,16 @@ namespace PSText.ViewModels
             {
                 if (_layout == null)
                 {
-                    return "1 页";
+                    return Loc.T("Preview_OnePage");
                 }
 
                 if (_layout.PageCount <= 1)
                 {
-                    return "1 页";
+                    return Loc.T("Preview_OnePage");
                 }
 
                 return string.Format(
-                    "{0} 页（{1} × {2}）",
+                    Loc.T("Preview_PageCount"),
                     _layout.PageCount,
                     _layout.PageColumns,
                     _layout.PageRows);
@@ -309,18 +326,18 @@ namespace PSText.ViewModels
 
                 if (_layout.PageCount > 1)
                 {
-                    warning = "图像超出可打印区域，将分多页打印。";
+                    warning = Loc.T("Preview_OverflowMultiPage");
                 }
                 else if (_layout.IsClipped)
                 {
-                    warning = "图像超出纸张范围，超出部分不会打印。";
+                    warning = Loc.T("Preview_OverflowClipped");
                 }
 
                 // 低于 150 DPI 时打印通常能看出模糊
                 if (_layout.EffectiveDpiX > 0.0 && _layout.EffectiveDpiX < 150.0)
                 {
                     string resolution = string.Format(
-                        "当前打印分辨率约 {0:0} DPI，低于 150 DPI 可能偏模糊；可缩小打印尺寸或降低图片尺寸。",
+                        Loc.T("Preview_LowDpi"),
                         _layout.EffectiveDpiX);
 
                     warning = string.IsNullOrEmpty(warning) ? resolution : warning + " " + resolution;

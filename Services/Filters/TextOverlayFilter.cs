@@ -23,6 +23,16 @@ namespace PSText.Services.Filters
         BottomRight
     }
 
+    /// <summary>水印的排布方式。</summary>
+    public enum TextLayout
+    {
+        /// <summary>按锚点放一处（九宫格位置之一）。</summary>
+        Single = 0,
+
+        /// <summary>按网格铺满整幅图（可倾斜），"防止截图外传"这类场景用。</summary>
+        Tile = 1
+    }
+
     /// <summary>文字水印参数。</summary>
     public sealed class TextOverlayOptions
     {
@@ -36,6 +46,10 @@ namespace PSText.Services.Filters
             Bold = true;
             Italic = false;
             Shadow = true;
+            Layout = TextLayout.Single;
+            TileSpacingXPercent = 25.0;
+            TileSpacingYPercent = 18.0;
+            TileAngleDegrees = -30.0;
         }
 
         /// <summary>文字内容。</summary>
@@ -50,10 +64,10 @@ namespace PSText.Services.Filters
         /// <summary>文字颜色。</summary>
         public Color Color { get; set; }
 
-        /// <summary>锚点位置。</summary>
+        /// <summary>锚点位置（仅 <see cref="TextLayout.Single"/> 有效）。</summary>
         public TextAnchor Anchor { get; set; }
 
-        /// <summary>距边缘的边距（像素）。</summary>
+        /// <summary>距边缘的边距（像素，仅 Single 有效）。</summary>
         public double Margin { get; set; }
 
         /// <summary>是否加粗。</summary>
@@ -64,6 +78,18 @@ namespace PSText.Services.Filters
 
         /// <summary>是否绘制投影（提升可读性）。</summary>
         public bool Shadow { get; set; }
+
+        /// <summary>排布方式。</summary>
+        public TextLayout Layout { get; set; }
+
+        /// <summary>平铺时的水平间距，占图像宽度的百分比。</summary>
+        public double TileSpacingXPercent { get; set; }
+
+        /// <summary>平铺时的垂直间距，占图像高度的百分比。</summary>
+        public double TileSpacingYPercent { get; set; }
+
+        /// <summary>平铺时的倾斜角度（度，负值为常见的左下→右上方向）。</summary>
+        public double TileAngleDegrees { get; set; }
     }
 
     /// <summary>
@@ -146,16 +172,26 @@ namespace PSText.Services.Filters
                     new SolidColorBrush(options.Color),
                     pixelsPerDip);
 
-                Point origin = CalculateOrigin(formatted, options.Anchor, width, height, margin);
+                Brush shadowBrush = null;
 
                 if (options.Shadow)
                 {
-                    // 投影：偏移 2 像素的半透明黑色，保证浅色背景上也能看清
-                    Geometry shadowGeometry = formatted.BuildGeometry(new Point(origin.X + 2, origin.Y + 2));
-                    context.DrawGeometry(new SolidColorBrush(Color.FromArgb(160, 0, 0, 0)), null, shadowGeometry);
+                    // 投影：偏移 2 像素的半透明黑色，保证浅色背景上也能看清。
+                    // 只建一次 —— 平铺时可能有上千个瓦片，每片 new 一个画刷是纯浪费。
+                    SolidColorBrush brush = new SolidColorBrush(Color.FromArgb(160, 0, 0, 0));
+                    brush.Freeze();
+                    shadowBrush = brush;
                 }
 
-                context.DrawText(formatted, origin);
+                if (options.Layout == TextLayout.Tile)
+                {
+                    DrawTiled(context, formatted, shadowBrush, width, height, options);
+                }
+                else
+                {
+                    Point origin = CalculateOrigin(formatted, options.Anchor, width, height, margin);
+                    DrawOne(context, formatted, shadowBrush, origin);
+                }
             }
 
             RenderTargetBitmap rendered = new RenderTargetBitmap(
@@ -170,6 +206,116 @@ namespace PSText.Services.Filters
 
             return PixelBuffer.FromBitmap(rendered);
         }
+
+        /// <summary>
+        /// 按网格把水印铺满整幅图。
+        ///
+        /// 三个必须处理的点：
+        ///   1. **倾斜时要按对角线铺**，不能按宽高铺 —— 网格转了 30° 之后，
+        ///      原本"刚好盖住"的矩形会在四个角留出空白。
+        ///   2. **瓦片数要设上限**：间距是按百分比给的，在 20000px 的大图上按 5% 铺
+        ///      就是 400×400 = 16 万个瓦片，会直接把界面卡死。超出上限时等比放大间距。
+        ///   3. 间距小于文字本身时瓦片会糊成一团，所以要给一个不小于文字尺寸的下限。
+        /// </summary>
+        private static void DrawTiled(
+            DrawingContext context,
+            FormattedText formatted,
+            Brush shadowBrush,
+            int width,
+            int height,
+            TextOverlayOptions options)
+        {
+            double stepX = width * ClampPercent(options.TileSpacingXPercent) / 100.0;
+            double stepY = height * ClampPercent(options.TileSpacingYPercent) / 100.0;
+
+            // 下限：至少能放得下一个字（再密就糊成一团，不叫水印叫噪声）
+            stepX = Math.Max(stepX, Math.Max(formatted.Width * 1.25, 12.0));
+            stepY = Math.Max(stepY, Math.Max(formatted.Height * 1.5, 12.0));
+
+            double angle = double.IsNaN(options.TileAngleDegrees) ? 0.0 : options.TileAngleDegrees;
+            angle = Math.Max(-80.0, Math.Min(80.0, angle));
+
+            // 旋转后要覆盖整幅图 ⇒ 按对角线铺
+            double diagonal = Math.Sqrt((double)width * width + (double)height * height);
+            double centerX = width / 2.0;
+            double centerY = height / 2.0;
+
+            int columns = (int)Math.Ceiling(diagonal / stepX) + 2;
+            int rows = (int)Math.Ceiling(diagonal / stepY) + 2;
+
+            if ((long)columns * rows > MaxTileCount)
+            {
+                double scale = Math.Sqrt((double)columns * rows / MaxTileCount);
+                stepX *= scale;
+                stepY *= scale;
+                columns = (int)Math.Ceiling(diagonal / stepX) + 2;
+                rows = (int)Math.Ceiling(diagonal / stepY) + 2;
+            }
+
+            double startX = centerX - columns * stepX / 2.0;
+            double startY = centerY - rows * stepY / 2.0;
+
+            // 文字在格子里居中，看起来才整齐
+            double offsetX = Math.Max(0.0, (stepX - formatted.Width) / 2.0);
+            double offsetY = Math.Max(0.0, (stepY - formatted.Height) / 2.0);
+
+            bool rotated = Math.Abs(angle) > 0.01;
+
+            if (rotated)
+            {
+                context.PushTransform(new RotateTransform(angle, centerX, centerY));
+            }
+
+            for (int row = 0; row < rows; row++)
+            {
+                for (int column = 0; column < columns; column++)
+                {
+                    DrawOne(
+                        context,
+                        formatted,
+                        shadowBrush,
+                        new Point(startX + column * stepX + offsetX, startY + row * stepY + offsetY));
+                }
+            }
+
+            if (rotated)
+            {
+                context.Pop();
+            }
+        }
+
+        private static void DrawOne(
+            DrawingContext context,
+            FormattedText formatted,
+            Brush shadowBrush,
+            Point origin)
+        {
+            if (shadowBrush != null)
+            {
+                Geometry shadowGeometry = formatted.BuildGeometry(new Point(origin.X + 2, origin.Y + 2));
+                context.DrawGeometry(shadowBrush, null, shadowGeometry);
+            }
+
+            context.DrawText(formatted, origin);
+        }
+
+        private static double ClampPercent(double percent)
+        {
+            if (double.IsNaN(percent) || percent < 3.0)
+            {
+                return 3.0;
+            }
+
+            return percent > 200.0 ? 200.0 : percent;
+        }
+
+        /// <summary>
+        /// 单幅图上的瓦片数上限。
+        ///
+        /// 取 4000 是因为每个瓦片都要建一次字形几何（开了投影时还要两次），
+        /// 再多就会明显卡顿；而 4000 个水印覆盖任何尺寸的图都绰绰有余。
+        /// </summary>
+        private const int MaxTileCount = 4000;
 
         /// <summary>
         /// 异步包装：把渲染放到线程池执行，避免大图在 UI 线程上同步渲染造成卡顿。

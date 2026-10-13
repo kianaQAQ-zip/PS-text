@@ -3,6 +3,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using System.Windows.Media;
 using PSText.Infrastructure.Imaging;
+using PSText.Services;
 
 namespace PSText.Services.Filters
 {
@@ -389,7 +390,7 @@ namespace PSText.Services.Filters
             {
                 throw new ArgumentOutOfRangeException(
                     "angleDegrees",
-                    string.Format("旋转后的画布过大：{0} × {1}。", outWidth, outHeight));
+                    string.Format(Loc.T("Pixel_ReasonCanvasTooLarge"), outWidth, outHeight));
             }
 
             int sourceWidth = source.Width;

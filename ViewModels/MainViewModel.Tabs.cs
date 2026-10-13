@@ -3,6 +3,7 @@ using System.Collections.ObjectModel;
 using System.Globalization;
 using System.Threading.Tasks;
 using System.Windows.Input;
+using PSText.Services;
 using PSText.Infrastructure;
 using PSText.Models;
 
@@ -242,7 +243,7 @@ namespace PSText.ViewModels
             }
             catch (Exception ex)
             {
-                HandleError("关闭标签页失败。", ex, true);
+                HandleError(Loc.T("Tabs_CloseFailed"), ex, true);
             }
         }
 

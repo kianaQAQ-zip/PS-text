@@ -31,6 +31,24 @@ namespace PSText.Models
         /// <summary>PreserveDpi 为 false 时使用的 DPI。</summary>
         public double DpiY { get; set; }
 
+        /// <summary>
+        /// 要从哪个文件读取元数据写回（通常是当前文档的源文件路径）。
+        ///
+        /// 这里传的是**路径而不是 BitmapMetadata 对象**，原因是那个类型有线程亲和性：
+        /// 解码发生在线程池线程上，对象一旦跨线程使用就抛"调用线程无法访问此对象"。
+        /// 传路径让编码器在**自己那个线程**上重新读一次，从根上绕开这个问题
+        /// （顺带还保证了写进去的一定是文件里的真实内容）。
+        /// </summary>
+        public string MetadataSourcePath { get; set; }
+
+        /// <summary>是否尝试保留源文件的元数据（默认关，由调用方显式打开）。</summary>
+        public bool PreserveMetadata { get; set; }
+
+        /// <summary>
+        /// 元数据因格式不匹配被丢弃时的说明（由编码方填写，供界面提示）。
+        /// </summary>
+        public string MetadataNote { get; set; }
+
         /// <summary>按文件扩展名创建默认保存参数。</summary>
         public static ImageSaveOptions FromPath(string path)
         {

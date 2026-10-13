@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
 using System.Text;
+using PSText.Services;
 
 namespace PSText.Services.Batch
 {
@@ -49,12 +50,12 @@ namespace PSText.Services.Batch
         {
             if (string.IsNullOrWhiteSpace(sourcePath))
             {
-                throw new ArgumentException("源文件路径不能为空。", "sourcePath");
+                throw new ArgumentException(Loc.T("Batch_ReasonSourcePath"), "sourcePath");
             }
 
             if (string.IsNullOrWhiteSpace(Directory))
             {
-                throw new InvalidOperationException("尚未指定输出目录。");
+                throw new InvalidOperationException(Loc.T("Batch_NoOutputPath"));
             }
 
             string baseName = Path.GetFileNameWithoutExtension(sourcePath);
@@ -88,7 +89,7 @@ namespace PSText.Services.Batch
             throw new IOException(
                 string.Format(
                     CultureInfo.InvariantCulture,
-                    "无法为「{0}」找到可用的输出文件名（尝试了 {1} 次）。",
+                    Loc.T("Batch_ReasonNoOutputName"),
                     Path.GetFileName(sourcePath),
                     MaxAttempts));
         }

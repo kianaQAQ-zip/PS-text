@@ -5,6 +5,7 @@ using System.Windows.Media;
 using PSText.Infrastructure.Imaging;
 using PSText.Models;
 using PSText.Services.Filters;
+using PSText.Services;
 
 namespace PSText.Services.Batch
 {
@@ -52,7 +53,7 @@ namespace PSText.Services.Batch
 
         public string DisplayName
         {
-            get { return "尺寸缩放"; }
+            get { return Loc.T("Batch_Resize"); }
         }
 
         public BatchResizeMode Mode { get; set; }
@@ -81,25 +82,25 @@ namespace PSText.Services.Batch
                 switch (Mode)
                 {
                     case BatchResizeMode.Percent:
-                        text = string.Format(CultureInfo.InvariantCulture, "缩放到 {0}%", Value);
+                        text = string.Format(CultureInfo.InvariantCulture, Loc.T("Step_ScaleTo"), Value);
                         break;
                     case BatchResizeMode.FitWidth:
-                        text = string.Format(CultureInfo.InvariantCulture, "宽度 {0} px", Value);
+                        text = string.Format(CultureInfo.InvariantCulture, Loc.T("Step_WidthPx"), Value);
                         break;
                     case BatchResizeMode.FitHeight:
-                        text = string.Format(CultureInfo.InvariantCulture, "高度 {0} px", Value);
+                        text = string.Format(CultureInfo.InvariantCulture, Loc.T("Step_Height"), Value);
                         break;
                     case BatchResizeMode.Exact:
-                        text = string.Format(CultureInfo.InvariantCulture, "{0} × {1} px（不保持比例）", Width, Height);
+                        text = string.Format(CultureInfo.InvariantCulture, Loc.T("Step_ExactSize"), Width, Height);
                         break;
                     default:
-                        text = string.Format(CultureInfo.InvariantCulture, "长边 {0} px", Value);
+                        text = string.Format(CultureInfo.InvariantCulture, Loc.T("Step_LongEdge"), Value);
                         break;
                 }
 
                 if (OnlyShrink)
                 {
-                    text += " · 只缩不放";
+                    text += Loc.T("Step_ShrinkOnly");
                 }
 
                 return text + " · " + DescribeKernel(Kernel);
@@ -257,11 +258,11 @@ namespace PSText.Services.Batch
             switch (kernel)
             {
                 case ResampleKernel.Bilinear:
-                    return "双线性";
+                    return Loc.T("Step_InterpBilinear");
                 case ResampleKernel.NearestNeighbor:
-                    return "邻近";
+                    return Loc.T("Step_InterpNearest");
                 default:
-                    return "三次立方";
+                    return Loc.T("Step_InterpCubic");
             }
         }
     }
@@ -281,7 +282,7 @@ namespace PSText.Services.Batch
 
         public string DisplayName
         {
-            get { return "基础调整"; }
+            get { return Loc.T("Adjust_Label"); }
         }
 
         public PixelAdjustments Adjustments { get; set; }
@@ -291,7 +292,7 @@ namespace PSText.Services.Batch
             get
             {
                 PixelAdjustments value = Adjustments ?? PixelAdjustments.Neutral;
-                return value.IsNeutral ? "中性（无变化）" : value.ToDisplayString();
+                return value.IsNeutral ? Loc.T("Step_Neutral") : value.ToDisplayString();
             }
         }
 
@@ -324,7 +325,7 @@ namespace PSText.Services.Batch
 
         public string DisplayName
         {
-            get { return "翻转旋转"; }
+            get { return Loc.T("Batch_RotateFlip"); }
         }
 
         public bool FlipHorizontal { get; set; }
@@ -342,20 +343,20 @@ namespace PSText.Services.Batch
 
                 if (Angle != RotationAngle.None)
                 {
-                    parts.Add(string.Format(CultureInfo.InvariantCulture, "顺时针 {0}°", (int)Angle));
+                    parts.Add(string.Format(CultureInfo.InvariantCulture, Loc.T("Step_RotateDegrees"), (int)Angle));
                 }
 
                 if (FlipHorizontal)
                 {
-                    parts.Add("左右翻转");
+                    parts.Add(Loc.T("Batch_FlipHorizontal"));
                 }
 
                 if (FlipVertical)
                 {
-                    parts.Add("上下翻转");
+                    parts.Add(Loc.T("Batch_FlipVertical"));
                 }
 
-                return parts.Count == 0 ? "无变化" : string.Join(" · ", parts.ToArray());
+                return parts.Count == 0 ? Loc.T("Step_NoChange") : string.Join(" · ", parts.ToArray());
             }
         }
 
@@ -416,7 +417,7 @@ namespace PSText.Services.Batch
 
         public string DisplayName
         {
-            get { return "边框"; }
+            get { return Loc.T("Border_Header"); }
         }
 
         public BorderStyle Style { get; set; }
@@ -437,16 +438,16 @@ namespace PSText.Services.Batch
                 switch (Style)
                 {
                     case BorderStyle.InnerLine:
-                        style = "内白外黑";
+                        style = Loc.T("Batch_BorderInset");
                         break;
                     case BorderStyle.Shadow:
-                        style = "柔和阴影";
+                        style = Loc.T("Border_SoftShadow");
                         break;
                     case BorderStyle.None:
-                        style = "无";
+                        style = Loc.T("Step_None");
                         break;
                     default:
-                        style = "实线";
+                        style = Loc.T("Batch_BorderSolid");
                         break;
                 }
 
@@ -516,7 +517,7 @@ namespace PSText.Services.Batch
     {
         public BatchWatermarkStep()
         {
-            Text = "仅供 XX 使用";
+            Text = Loc.T("Step_DefaultWatermarkText");
             FontFamilyName = "Microsoft YaHei UI";
             SizeMode = WatermarkSizeMode.RelativeToWidth;
             FontSize = 5.0;
@@ -527,6 +528,11 @@ namespace PSText.Services.Batch
             Bold = true;
             Italic = false;
             Shadow = false;
+
+            Layout = TextLayout.Single;
+            TileSpacingX = 25.0;
+            TileSpacingY = 18.0;
+            TileAngle = -30.0;
         }
 
         public BatchStepKind Kind
@@ -536,7 +542,7 @@ namespace PSText.Services.Batch
 
         public string DisplayName
         {
-            get { return "文字水印"; }
+            get { return Loc.T("Batch_Watermark"); }
         }
 
         public string Text { get; set; }
@@ -564,22 +570,36 @@ namespace PSText.Services.Batch
 
         public bool Shadow { get; set; }
 
+        /// <summary>排布方式：单点（按锚点）或平铺满画面。</summary>
+        public TextLayout Layout { get; set; }
+
+        /// <summary>平铺时的水平间距（占图像宽度的百分比）。</summary>
+        public double TileSpacingX { get; set; }
+
+        /// <summary>平铺时的垂直间距（占图像高度的百分比）。</summary>
+        public double TileSpacingY { get; set; }
+
+        /// <summary>平铺时的倾斜角度（度）。</summary>
+        public double TileAngle { get; set; }
+
         public string Summary
         {
             get
             {
-                string text = string.IsNullOrEmpty(Text) ? "（未填写文字）" : "「" + Text + "」";
+                string text = string.IsNullOrEmpty(Text) ? Loc.T("Step_NoText") : "「" + Text + "」";
 
                 string size = SizeMode == WatermarkSizeMode.RelativeToWidth
-                    ? string.Format(CultureInfo.InvariantCulture, "宽度 {0:0.#}%", FontSize)
+                    ? string.Format(CultureInfo.InvariantCulture, Loc.T("Step_WidthPercent"), FontSize)
                     : string.Format(CultureInfo.InvariantCulture, "{0:0.#} px", FontSize);
 
                 return string.Format(
                     CultureInfo.InvariantCulture,
-                    "{0} · {1} · {2} · 不透明度 {3}%",
+                    Loc.T("Step_WatermarkSummary"),
                     text,
                     size,
-                    DescribeAnchor(Anchor),
+                    Layout == TextLayout.Tile
+                        ? string.Format(CultureInfo.InvariantCulture, Loc.T("Step_TileSummary"), TileSpacingX, TileSpacingY, TileAngle)
+                        : DescribeAnchor(Anchor),
                     (int)Math.Round(Opacity / 255.0 * 100.0));
             }
         }
@@ -633,7 +653,11 @@ namespace PSText.Services.Batch
                 Margin = margin,
                 Bold = Bold,
                 Italic = Italic,
-                Shadow = Shadow
+                Shadow = Shadow,
+                Layout = Layout,
+                TileSpacingXPercent = TileSpacingX,
+                TileSpacingYPercent = TileSpacingY,
+                TileAngleDegrees = TileAngle
             };
 
             return new TextOverlayFilter().Apply(source, options, context.DpiX, context.DpiY);
@@ -653,7 +677,11 @@ namespace PSText.Services.Batch
                 Anchor = Anchor,
                 Bold = Bold,
                 Italic = Italic,
-                Shadow = Shadow
+                Shadow = Shadow,
+                Layout = Layout,
+                TileSpacingX = TileSpacingX,
+                TileSpacingY = TileSpacingY,
+                TileAngle = TileAngle
             };
         }
 
@@ -663,23 +691,23 @@ namespace PSText.Services.Batch
             switch (anchor)
             {
                 case TextAnchor.TopLeft:
-                    return "左上";
+                    return Loc.T("Anchor_TopLeft");
                 case TextAnchor.TopCenter:
-                    return "上中";
+                    return Loc.T("Anchor_TopCenter");
                 case TextAnchor.TopRight:
-                    return "右上";
+                    return Loc.T("Anchor_TopRight");
                 case TextAnchor.MiddleLeft:
-                    return "左中";
+                    return Loc.T("Anchor_MiddleLeft");
                 case TextAnchor.Center:
-                    return "居中";
+                    return Loc.T("Anchor_Center");
                 case TextAnchor.MiddleRight:
-                    return "右中";
+                    return Loc.T("Anchor_MiddleRight");
                 case TextAnchor.BottomLeft:
-                    return "左下";
+                    return Loc.T("Anchor_BottomLeft");
                 case TextAnchor.BottomCenter:
-                    return "下中";
+                    return Loc.T("Anchor_BottomCenter");
                 default:
-                    return "右下";
+                    return Loc.T("Anchor_BottomRight");
             }
         }
 
@@ -707,7 +735,7 @@ namespace PSText.Services.Batch
             {
                 return string.Format(
                     CultureInfo.InvariantCulture,
-                    "#{0:X2}{1:X2}{2:X2}（透明度 {3}%）",
+                    Loc.T("Step_ColorSwatch"),
                     color.R,
                     color.G,
                     color.B,
@@ -716,17 +744,17 @@ namespace PSText.Services.Batch
 
             if (color.R == 255 && color.G == 255 && color.B == 255)
             {
-                return "白色";
+                return Loc.T("Common_White");
             }
 
             if (color.R == 0 && color.G == 0 && color.B == 0)
             {
-                return "黑色";
+                return Loc.T("Common_Black");
             }
 
             if (color.R == color.G && color.G == color.B)
             {
-                return string.Format(CultureInfo.InvariantCulture, "灰阶 {0}", color.R);
+                return string.Format(CultureInfo.InvariantCulture, Loc.T("Step_Grayscale"), color.R);
             }
 
             return string.Format(CultureInfo.InvariantCulture, "#{0:X2}{1:X2}{2:X2}", color.R, color.G, color.B);

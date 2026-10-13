@@ -6,6 +6,7 @@ using System.Windows.Controls;
 using System.Windows.Media.Imaging;
 using PSText.Services.Interfaces;
 using PSText.Services.Printing;
+using PSText.Services;
 
 namespace PSText.Services
 {
@@ -202,7 +203,7 @@ namespace PSText.Services
             if (dialog != null)
             {
                 // 走系统对话框：份数 / 页面范围由对话框负责
-                dialog.PrintDocument(paginator, "PS-text 打印");
+                dialog.PrintDocument(paginator, Loc.T("Printer_JobName"));
                 return;
             }
 
@@ -234,7 +235,7 @@ namespace PSText.Services
 
                     if (queue == null)
                     {
-                        throw new InvalidOperationException("找不到可用的打印机。");
+                        throw new InvalidOperationException(Loc.T("Printer_None"));
                     }
 
                     int effectiveCopies = copies < 1 ? 1 : copies;
@@ -251,7 +252,7 @@ namespace PSText.Services
             }
             catch (Exception ex)
             {
-                throw new InvalidOperationException("打印失败：" + ex.Message, ex);
+                throw new InvalidOperationException(Loc.T("Printer_Failed") + ex.Message, ex);
             }
         }
 

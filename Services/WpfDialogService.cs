@@ -5,6 +5,7 @@ using System.Text;
 using System.Windows;
 using Microsoft.Win32;
 using PSText.Services.Interfaces;
+using PSText.Services;
 
 namespace PSText.Services
 {
@@ -17,20 +18,21 @@ namespace PSText.Services
     /// </summary>
     public sealed class WpfDialogService : IDialogService
     {
-        private const string ImageOpenFilter =
-            "所有支持的图片|*.jpg;*.jpeg;*.jpe;*.jfif;*.png;*.bmp;*.dib;*.tif;*.tiff;*.gif"
-            + "|JPEG 图片|*.jpg;*.jpeg;*.jpe;*.jfif"
-            + "|PNG 图片|*.png"
-            + "|BMP 图片|*.bmp;*.dib"
-            + "|TIFF 图片|*.tif;*.tiff"
-            + "|GIF 图片|*.gif"
-            + "|所有文件|*.*";
+        // 不能是 const：过滤器的文字要跟着界面语言走（const 只接受编译期常量）。
+        private static readonly string ImageOpenFilter =
+            Loc.T("Filter_AllSupported")
+            + Loc.T("Filter_JpegExt")
+            + Loc.T("Filter_PngExt")
+            + Loc.T("Filter_BmpExt")
+            + Loc.T("Filter_Tiff")
+            + Loc.T("Filter_Gif")
+            + Loc.T("Filter_AllFiles");
 
         public string ShowOpenImageDialog(string title, string initialDirectory)
         {
             OpenFileDialog dialog = new OpenFileDialog
             {
-                Title = string.IsNullOrWhiteSpace(title) ? "打开图片" : title,
+                Title = string.IsNullOrWhiteSpace(title) ? Loc.T("Dialog_OpenImage") : title,
                 Filter = ImageOpenFilter,
                 Multiselect = false,
                 CheckFileExists = true,
@@ -46,7 +48,7 @@ namespace PSText.Services
         {
             OpenFileDialog dialog = new OpenFileDialog
             {
-                Title = string.IsNullOrWhiteSpace(title) ? "打开图片" : title,
+                Title = string.IsNullOrWhiteSpace(title) ? Loc.T("Dialog_OpenImage") : title,
                 Filter = ImageOpenFilter,
                 Multiselect = true,
                 CheckFileExists = true,
@@ -72,9 +74,9 @@ namespace PSText.Services
         {
             SaveFileDialog dialog = new SaveFileDialog
             {
-                Title = string.IsNullOrWhiteSpace(title) ? "保存图片" : title,
+                Title = string.IsNullOrWhiteSpace(title) ? Loc.T("Dialog_SaveImage") : title,
                 Filter = string.IsNullOrWhiteSpace(filter) ? ImageOpenFilter : filter,
-                FileName = string.IsNullOrWhiteSpace(suggestedFileName) ? "未命名.png" : suggestedFileName,
+                FileName = string.IsNullOrWhiteSpace(suggestedFileName) ? Loc.T("Dialog_UntitledPng") : suggestedFileName,
                 AddExtension = true,
                 OverwritePrompt = true,
                 CheckPathExists = true
@@ -95,7 +97,7 @@ namespace PSText.Services
             // 使用 WinForms 的 FolderBrowserDialog：Win7 上最稳定，无 COM 版本差异。
             using (System.Windows.Forms.FolderBrowserDialog dialog = new System.Windows.Forms.FolderBrowserDialog())
             {
-                dialog.Description = string.IsNullOrWhiteSpace(title) ? "选择文件夹" : title;
+                dialog.Description = string.IsNullOrWhiteSpace(title) ? Loc.T("Dialog_PickFolder") : title;
                 dialog.ShowNewFolderButton = true;
 
                 if (!string.IsNullOrWhiteSpace(initialDirectory) && Directory.Exists(initialDirectory))
@@ -111,7 +113,7 @@ namespace PSText.Services
         {
             MessageBoxResult result = MessageBox.Show(
                 message ?? string.Empty,
-                string.IsNullOrWhiteSpace(title) ? "确认" : title,
+                string.IsNullOrWhiteSpace(title) ? Loc.T("Dialog_Confirm") : title,
                 MessageBoxButton.YesNoCancel,
                 MessageBoxImage.Question,
                 MessageBoxResult.Yes);
@@ -131,7 +133,7 @@ namespace PSText.Services
         {
             MessageBox.Show(
                 message ?? string.Empty,
-                string.IsNullOrWhiteSpace(title) ? "错误" : title,
+                string.IsNullOrWhiteSpace(title) ? Loc.T("Dialog_Error") : title,
                 MessageBoxButton.OK,
                 MessageBoxImage.Error);
         }
@@ -140,7 +142,7 @@ namespace PSText.Services
         {
             MessageBox.Show(
                 message ?? string.Empty,
-                string.IsNullOrWhiteSpace(title) ? "提示" : title,
+                string.IsNullOrWhiteSpace(title) ? Loc.T("Dialog_Prompt") : title,
                 MessageBoxButton.OK,
                 MessageBoxImage.Information);
         }
@@ -148,17 +150,17 @@ namespace PSText.Services
         public void ShowException(string message, Exception exception, string title)
         {
             StringBuilder builder = new StringBuilder();
-            builder.AppendLine(message ?? "发生未预期的错误。");
+            builder.AppendLine(message ?? Loc.T("Dialog_Unexpected"));
 
             if (exception != null)
             {
                 builder.AppendLine();
-                builder.AppendLine("错误详情：");
+                builder.AppendLine(Loc.T("Dialog_ErrorDetail"));
                 builder.AppendLine(exception.Message);
 
                 if (exception.InnerException != null)
                 {
-                    builder.AppendLine("内部错误：" + exception.InnerException.Message);
+                    builder.AppendLine(Loc.T("Dialog_InternalError") + exception.InnerException.Message);
                 }
             }
 

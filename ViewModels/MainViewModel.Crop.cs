@@ -4,6 +4,7 @@ using System.Windows.Input;
 using PSText.Infrastructure;
 using PSText.Infrastructure.Imaging;
 using PSText.Services.Filters;
+using PSText.Services;
 
 namespace PSText.ViewModels
 {
@@ -148,7 +149,7 @@ namespace PSText.ViewModels
                 }
 
                 return string.Format(
-                    "裁剪区域：{0:0} × {1:0} px  @ ({2:0}, {3:0})",
+                    Loc.T("Crop_Region"),
                     _cropWidth,
                     _cropHeight,
                     _cropX,
@@ -168,7 +169,7 @@ namespace PSText.ViewModels
 
             IsCropping = true;
             SetCropRect(0, 0, _document.PixelWidth, _document.PixelHeight);
-            StatusMessage = "裁剪模式：拖动框内移动，拖动边角缩放，然后点“应用裁剪”";
+            StatusMessage = Loc.T("Crop_ModeHint");
         }
 
         /// <summary>退出裁剪模式（不改变图像）。</summary>
@@ -176,7 +177,7 @@ namespace PSText.ViewModels
         {
             IsCropping = false;
             _isDraggingCrop = false;
-            StatusMessage = "已取消裁剪";
+            StatusMessage = Loc.T("Crop_Canceled");
         }
 
         /// <summary>由 View 在鼠标按下时调用，开始拖动 / 缩放裁剪框。</summary>
@@ -408,7 +409,7 @@ namespace PSText.ViewModels
 
             if (width < MinCropSize || height < MinCropSize)
             {
-                StatusMessage = "裁剪区域太小，请重新选择";
+                StatusMessage = Loc.T("Crop_TooSmall");
                 return;
             }
 
@@ -416,7 +417,7 @@ namespace PSText.ViewModels
 
             GeometryFilters geometry = _geometryFilters;
             _pendingOperation = ApplyOneShotAsync(
-                "裁剪",
+                Loc.T("Crop_Header"),
                 buffer => geometry.CropAsync(buffer, x, y, width, height));
         }
     }

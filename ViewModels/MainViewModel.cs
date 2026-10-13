@@ -15,6 +15,7 @@ using PSText.Infrastructure.Imaging;
 using PSText.Models;
 using PSText.Services.Filters;
 using PSText.Services.Interfaces;
+using PSText.Services;
 
 namespace PSText.ViewModels
 {
@@ -425,7 +426,7 @@ namespace PSText.ViewModels
 
         public string FileName
         {
-            get { return _document == null ? "未打开图片" : _document.FileName; }
+            get { return _document == null ? Loc.T("Status_NoImage") : _document.FileName; }
         }
 
         public string PixelSizeText
@@ -468,7 +469,7 @@ namespace PSText.ViewModels
             {
                 if (_document == null)
                 {
-                    return "PS-text 图片编辑器";
+                    return Loc.T("App_Title");
                 }
 
                 return string.Format(
@@ -594,11 +595,11 @@ namespace PSText.ViewModels
 
                 if (_document == null)
                 {
-                    return "就绪：请打开一张图片（Ctrl+O）";
+                    return Loc.T("Status_Ready");
                 }
 
                 return string.Format(
-                    "{0} · {1} · {2} · 缩放 {3}",
+                    Loc.T("Status_ImageInfo"),
                     _document.FileName,
                     _document.PixelSizeText,
                     _document.DpiText,
@@ -694,7 +695,7 @@ namespace PSText.ViewModels
         {
             ZoomMode = ZoomMode.FitToWindow;
             ZoomFactor = CalculateFitZoom();
-            StatusMessage = "已适应窗口显示";
+            StatusMessage = Loc.T("Status_FitToWindow");
         }
 
         /// <summary>原始大小：1 个图片像素对应 1 个屏幕像素。</summary>
@@ -702,7 +703,7 @@ namespace PSText.ViewModels
         {
             ZoomMode = ZoomMode.ActualSize;
             ZoomFactor = CalculateActualSizeZoom();
-            StatusMessage = "已切换到原始大小（100% 物理像素）";
+            StatusMessage = Loc.T("Status_ActualSize");
         }
 
         /// <summary>放大一档。</summary>
@@ -804,7 +805,7 @@ namespace PSText.ViewModels
                 ? SafeGetDirectory(_document.FilePath)
                 : null;
 
-            string filePath = _dialogService.ShowOpenImageDialog("打开图片", initialDirectory);
+            string filePath = _dialogService.ShowOpenImageDialog(Loc.T("Dialog_OpenImage"), initialDirectory);
             if (string.IsNullOrWhiteSpace(filePath))
             {
                 return;
@@ -823,7 +824,7 @@ namespace PSText.ViewModels
 
             if (!File.Exists(filePath))
             {
-                _dialogService.ShowError("文件不存在：" + filePath, "打开失败");
+                _dialogService.ShowError(Loc.T("Error_FileNotExist") + filePath, Loc.T("Dialog_OpenFailed"));
                 return;
             }
 
@@ -839,7 +840,7 @@ namespace PSText.ViewModels
             }
 
             IsBusy = true;
-            StatusMessage = "正在加载：" + Path.GetFileName(filePath);
+            StatusMessage = Loc.T("Status_Loading") + Path.GetFileName(filePath);
             bool loaded = false;
 
             try
@@ -862,17 +863,21 @@ namespace PSText.ViewModels
 
                 await _dispatcherService.InvokeAsync(() =>
                 {
-                    ZoomMode = ZoomMode.FitToWindow;
-                    ZoomFactor = CalculateFitZoom();
+                    // 用上次记住的缩放模式（默认"适应窗口"）。
+                    // 「适应窗口」与「原始大小」是有稳定意图的；自由缩放不记，理由见 SaveSettings。
+                    ZoomMode preferredZoom = PreferredZoomMode;
+
+                    ZoomMode = preferredZoom;
+                    ZoomFactor = preferredZoom == ZoomMode.ActualSize ? 1.0 : CalculateFitZoom();
 
                     StatusMessage = result.OrientationNormalized
                         ? string.Format(
-                            "已加载 {0}（{1}，{2}，已按 EXIF 方向校正）",
+                            Loc.T("Status_LoadedOriented"),
                             Document.FileName,
                             Document.PixelSizeText,
                             Document.DpiText)
                         : string.Format(
-                            "已加载 {0}（{1}，{2}）",
+                            Loc.T("Status_Loaded"),
                             Document.FileName,
                             Document.PixelSizeText,
                             Document.DpiText);
@@ -880,23 +885,23 @@ namespace PSText.ViewModels
             }
             catch (FileNotFoundException ex)
             {
-                HandleError("图片文件已被移动或删除。", ex, false);
+                HandleError(Loc.T("Error_FileMissing"), ex, false);
             }
             catch (NotSupportedException ex)
             {
-                HandleError("不支持该图片格式，或文件已损坏。", ex, true);
+                HandleError(Loc.T("Error_UnsupportedFormat"), ex, true);
             }
             catch (UnauthorizedAccessException ex)
             {
-                HandleError("没有权限读取该文件。", ex, true);
+                HandleError(Loc.T("Error_NoReadPermission"), ex, true);
             }
             catch (IOException ex)
             {
-                HandleError("读取文件失败，文件可能正被其他程序占用。", ex, true);
+                HandleError(Loc.T("Error_ReadFailed"), ex, true);
             }
             catch (Exception ex)
             {
-                HandleError("加载图片失败。", ex, true);
+                HandleError(Loc.T("Error_LoadFailed"), ex, true);
             }
             finally
             {
@@ -968,7 +973,7 @@ namespace PSText.ViewModels
             string initialDirectory = SafeGetDirectory(_document.FilePath);
 
             string filePath = _dialogService.ShowSaveImageDialog(
-                "另存为",
+                Loc.T("Tip_SaveAs"),
                 initialDirectory,
                 suggestedName,
                 BuildSaveFilter(),
@@ -1016,7 +1021,7 @@ namespace PSText.ViewModels
             snapshot = WithAnnotationsBaked(snapshot);
 
             IsBusy = true;
-            StatusMessage = "正在保存：" + Path.GetFileName(filePath);
+            StatusMessage = Loc.T("Status_Saving") + Path.GetFileName(filePath);
 
             try
             {
@@ -1025,7 +1030,13 @@ namespace PSText.ViewModels
                     Format = format,
                     PreserveDpi = true,
                     QualityLevel = 92,
-                    TiffCompression = "Lzw"
+                    TiffCompression = "Lzw",
+
+                    // 元数据：只把**源文件路径**交给编码方，让它在自己那个线程上重读。
+                    // 不能把 BitmapMetadata 对象传过来 —— 它有线程亲和性，
+                    // 跨线程访问会抛异常、被 catch 之后表现成"元数据神秘消失"。
+                    PreserveMetadata = snapshot.HasSourceMetadata || snapshot.HasColorProfile,
+                    MetadataSourcePath = snapshot.FilePath
                 };
 
                 long written = await _imageService
@@ -1042,26 +1053,34 @@ namespace PSText.ViewModels
                         snapshot.DpiX,
                         snapshot.DpiY,
                         written,
-                        false);
+                        false,
+                        snapshot.HasSourceMetadata,
+                        snapshot.HasColorProfile);
                 }
                 else
                 {
                     Document = snapshot.MarkSaved(filePath, format, written);
                 }
 
-                StatusMessage = string.Format("已保存：{0}（{1}）", Document.FileName, Document.FileSizeText);
+                StatusMessage = string.Format(Loc.T("Status_Saved"), Document.FileName, Document.FileSizeText);
+
+                // 元数据没能带过去时要说话 —— 用户以为还在、结果没了，比一开始就没有更糟。
+                if (!string.IsNullOrEmpty(options.MetadataNote))
+                {
+                    StatusMessage += " · " + options.MetadataNote;
+                }
             }
             catch (UnauthorizedAccessException ex)
             {
-                HandleError("没有权限写入该位置，请换一个目录。", ex, true);
+                HandleError(Loc.T("Error_NoWritePermission"), ex, true);
             }
             catch (IOException ex)
             {
-                HandleError("写入文件失败，目标文件可能正被其他程序占用。", ex, true);
+                HandleError(Loc.T("Error_WriteFailed"), ex, true);
             }
             catch (Exception ex)
             {
-                HandleError("保存失败。", ex, true);
+                HandleError(Loc.T("Error_SaveFailed"), ex, true);
             }
             finally
             {
@@ -1071,11 +1090,11 @@ namespace PSText.ViewModels
 
         private static string BuildSaveFilter()
         {
-            return "PNG 图片|*.png"
-                   + "|JPEG 图片|*.jpg;*.jpeg"
-                   + "|BMP 图片|*.bmp"
-                   + "|TIFF 图片|*.tif;*.tiff"
-                   + "|GIF 图片|*.gif";
+            return Loc.T("Filter_Png")
+                   + Loc.T("Filter_Jpeg")
+                   + Loc.T("Filter_Bmp")
+                   + Loc.T("Filter_Tiff")
+                   + Loc.T("Filter_Gif");
         }
 
         /// <summary>
@@ -1120,9 +1139,9 @@ namespace PSText.ViewModels
             }
 
             ConfirmResult result = _dialogService.Confirm(
-                "当前图片有未保存的修改。\n\n"
-                + "选择“是”保存后关闭，选择“否”放弃修改，选择“取消”返回继续编辑。",
-                "有未保存的修改");
+                Loc.T("Dialog_UnsavedBody1")
+                + Loc.T("Dialog_UnsavedBody2"),
+                Loc.T("Dialog_UnsavedTitle"));
 
             if (result == ConfirmResult.Cancel)
             {
@@ -1147,7 +1166,7 @@ namespace PSText.ViewModels
         private AsyncRelayCommand CreateAsyncCommand(Func<Task> action, Func<bool> canExecute)
         {
             AsyncRelayCommand command = new AsyncRelayCommand(action, canExecute);
-            command.ErrorHandler = ex => HandleError("操作执行失败。", ex, true);
+            command.ErrorHandler = ex => HandleError(Loc.T("Error_OperationFailed"), ex, true);
             return command;
         }
 
@@ -1168,7 +1187,7 @@ namespace PSText.ViewModels
 
             try
             {
-                _dialogService.ShowException(message, exception, "出错了");
+                _dialogService.ShowException(message, exception, Loc.T("App_Error"));
             }
             catch (Exception dialogException)
             {
@@ -1198,7 +1217,7 @@ namespace PSText.ViewModels
         {
             // 文本在 MainViewModel.System.cs 里拼：那里能拿到运行环境与日志路径，
             // 用户报问题时"关于"里的这几行往往就是最关键的信息。
-            _dialogService.ShowInformation(BuildAboutText(), "关于 PS-text");
+            _dialogService.ShowInformation(BuildAboutText(), Loc.T("Menu_About"));
         }
 
         #endregion

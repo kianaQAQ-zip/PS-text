@@ -52,7 +52,7 @@ namespace PSText.ViewModels
         /// <summary>菜单项显示文本（文件缺失时加标记）。</summary>
         public string DisplayName
         {
-            get { return _isMissing ? FileName + "（已不存在）" : FileName; }
+            get { return _isMissing ? FileName + Loc.T("Settings_RecentGone") : FileName; }
         }
 
         /// <summary>所在目录（提示用）。</summary>
@@ -255,8 +255,8 @@ namespace PSText.ViewModels
             if (!File.Exists(filePath))
             {
                 ConfirmResult result = _dialogService.Confirm(
-                    "该文件已不存在：\n" + filePath + "\n\n是否从最近记录中移除？",
-                    "打开最近文件");
+                    Loc.T("Settings_RecentMissing") + filePath + Loc.T("Settings_RecentRemove"),
+                    Loc.T("Settings_RecentOpen"));
 
                 if (result != ConfirmResult.Cancel)
                 {
@@ -342,7 +342,7 @@ namespace PSText.ViewModels
 
                 if (_themePreference == ThemePreference.FollowSystem)
                 {
-                    name += "（当前" + ThemeManager.GetThemeDisplayName(ThemeManager.CurrentTheme) + "）";
+                    name += Loc.T("Settings_CurrentSuffix") + ThemeManager.GetThemeDisplayName(ThemeManager.CurrentTheme) + "）";
                 }
 
                 return name;
@@ -377,7 +377,7 @@ namespace PSText.ViewModels
             }
             catch (Exception ex)
             {
-                HandleError("切换主题失败。", ex, false);
+                HandleError(Loc.T("Settings_ThemeFailed"), ex, false);
             }
 
             _settings.ThemePreference = preference;
@@ -385,7 +385,7 @@ namespace PSText.ViewModels
 
             // 切换后重新通知一次（跟随系统的实际结果可能变化）
             OnPropertyChanged("ThemeDisplayText");
-            StatusMessage = "主题已切换为：" + ThemeDisplayText;
+            StatusMessage = Loc.T("Settings_ThemeChanged") + ThemeDisplayText;
         }
 
         /// <summary>在浅色 / 深色之间快速切换（快捷键与按钮用）。</summary>
@@ -520,11 +520,221 @@ namespace PSText.ViewModels
             try
             {
                 _settings.ThemePreference = _themePreference;
+
+                // 只记"适应窗口 / 原始大小"这两种**意图**。
+                // 自由缩放（Free）记的是用户随手滚出来的比例，既没有稳定的语义、
+                // 下张图尺寸也未必一样，记下来只会让人莫名其妙。
+                _settings.SavedZoomMode = _zoomMode == ZoomMode.Free
+                    ? (int)ZoomMode.FitToWindow
+                    : (int)_zoomMode;
+
                 _settingsService.Save(_settings);
             }
             catch (Exception ex)
             {
                 System.Diagnostics.Debug.WriteLine("[MainViewModel] 保存设置失败: " + ex.Message);
+            }
+        }
+
+        #endregion
+
+        #region 界面语言
+
+        /// <summary>可选语言（供菜单绑定）。</summary>
+        public System.Collections.Generic.IList<LanguageOption> AvailableLanguages
+        {
+            get { return LocalizationService.Instance.AvailableLanguages; }
+        }
+
+        /// <summary>当前界面语言代码。</summary>
+        public string CurrentLanguage
+        {
+            get { return LocalizationService.Instance.CurrentCulture; }
+        }
+
+        /// <summary>当前是否中文（菜单勾选用）。</summary>
+        public bool IsLanguageChinese
+        {
+            get { return string.Equals(CurrentLanguage, "zh-CN", StringComparison.OrdinalIgnoreCase); }
+            set { if (value) SetLanguage("zh-CN"); }
+        }
+
+        /// <summary>当前是否英文（菜单勾选用）。</summary>
+        public bool IsLanguageEnglish
+        {
+            get { return string.Equals(CurrentLanguage, "en-US", StringComparison.OrdinalIgnoreCase); }
+            set { if (value) SetLanguage("en-US"); }
+        }
+
+        /// <summary>
+        /// 切换界面语言并记住选择。
+        ///
+        /// XAML 那一侧不需要逐个刷新：语言字典是整体换掉的，
+        /// 所有 <c>{DynamicResource}</c> 会自动重新求值。
+        /// 需要我做的只有两件事：换字典（服务内部做）与把偏好写进设置。
+        /// </summary>
+        private void SetLanguage(string culture)
+        {
+            if (string.Equals(culture, CurrentLanguage, StringComparison.OrdinalIgnoreCase))
+            {
+                return;
+            }
+
+            LocalizationService.Instance.SetLanguage(culture);
+
+            if (_settings != null)
+            {
+                _settings.LanguageCulture = culture;
+            }
+
+            SaveSettings();
+
+            OnPropertyChanged("CurrentLanguage");
+            OnPropertyChanged("IsLanguageChinese");
+            OnPropertyChanged("IsLanguageEnglish");
+
+            // 状态栏那几行是 ViewModel 拼出来的，不跟着 XAML 刷新，得手动重发一遍。
+            RaiseLocalizedTextPropertiesChanged();
+
+            StatusMessage = Loc.T("Status_LanguageChanged", culture);
+        }
+
+        /// <summary>语言切换后重发"由代码拼出来的"(非 XAML 绑定)文本。</summary>
+        private void RaiseLocalizedTextPropertiesChanged()
+        {
+            OnPropertyChanged("SelectedAnnotationInfoText");
+            OnPropertyChanged("WindowTitle");
+            OnPropertyChanged("FormatText");
+            OnPropertyChanged("DpiText");
+            OnPropertyChanged("PhysicalSizeText");
+            OnPropertyChanged("ZoomPercentText");
+            OnPropertyChanged("HasSelectedAnnotation");
+            RefreshRecentFiles();
+        }
+
+        #endregion
+
+        #region 窗口 / 面板状态记忆
+
+        /// <summary>右侧面板宽度的下限（与 MainWindow.xaml 里那一列的 MinWidth 保持一致）。</summary>
+        public const double MinimumPanelWidth = 220.0;
+
+        /// <summary>右侧面板宽度的上限 —— 再宽就把画布挤没了。</summary>
+        public const double MaximumPanelWidth = 640.0;
+
+        /// <summary>
+        /// 保存过的窗口矩形；没保存过时返回 null。
+        ///
+        /// 注意这里**不做屏幕校验** —— 校验属于界面层（要知道各显示器的工作区），
+        /// 由 <see cref="Services.WindowPlacement.TryFit"/> 负责。
+        /// ViewModel 只负责"把上次记下来的数字交出来 / 收回去"。
+        /// </summary>
+        public Rect? SavedWindowBounds
+        {
+            get
+            {
+                if (_settings == null || !_settings.HasWindowBounds)
+                {
+                    return null;
+                }
+
+                return new Rect(
+                    _settings.WindowLeft,
+                    _settings.WindowTop,
+                    _settings.WindowWidth,
+                    _settings.WindowHeight);
+            }
+        }
+
+        /// <summary>保存过的最大化状态。</summary>
+        public bool SavedWindowMaximized
+        {
+            get { return _settings != null && _settings.WindowMaximized; }
+        }
+
+        /// <summary>保存过的右侧面板宽度；没有有效值时返回 0。</summary>
+        public double SavedPanelWidth
+        {
+            get
+            {
+                if (_settings == null)
+                {
+                    return 0.0;
+                }
+
+                double width = _settings.PanelWidth;
+
+                // 面板宽度给上下限：太小会挤到看不见，太大就把画布压没了。
+                // 下限与 XAML 里那一列的 MinWidth 对齐，避免"存进去的值反而被界面拒绝"。
+                if (double.IsNaN(width) || width < MinimumPanelWidth)
+                {
+                    return 0.0;
+                }
+
+                return width > MaximumPanelWidth ? MaximumPanelWidth : width;
+            }
+        }
+
+        /// <summary>
+        /// 记住窗口与面板状态。由界面层在关闭前调用（几何只有界面层知道）。
+        /// </summary>
+        public void SaveWindowState(Rect bounds, bool maximized, double panelWidth)
+        {
+            if (_settings == null || _settingsService == null)
+            {
+                return;
+            }
+
+            try
+            {
+                if (bounds.Width >= WindowPlacement.MinimumWidth
+                    && bounds.Height >= WindowPlacement.MinimumHeight)
+                {
+                    _settings.WindowLeft = bounds.Left;
+                    _settings.WindowTop = bounds.Top;
+                    _settings.WindowWidth = bounds.Width;
+                    _settings.WindowHeight = bounds.Height;
+                }
+
+                _settings.WindowMaximized = maximized;
+
+                // 收敛而不是"超限就丢弃"：丢弃会让上一次的旧值悄悄留着，
+                // 表现为"我明明把面板拖得很宽，下次打开还是旧的宽度"。
+                if (!double.IsNaN(panelWidth) && panelWidth > 0.0)
+                {
+                    _settings.PanelWidth = Math.Max(MinimumPanelWidth, Math.Min(MaximumPanelWidth, panelWidth));
+                }
+
+                SaveSettings();
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine("[MainViewModel] 保存窗口状态失败: " + ex.Message);
+            }
+        }
+
+        /// <summary>
+        /// 上次用过的缩放模式（没有记录时返回"适应窗口"）。
+        ///
+        /// 放在这里而不是直接读设置对象：调用方（加载图片时）不该关心"设置里存的是 int"。
+        /// </summary>
+        public ZoomMode PreferredZoomMode
+        {
+            get
+            {
+                if (_settings == null || !_settings.HasZoomModeSaved)
+                {
+                    return ZoomMode.FitToWindow;
+                }
+
+                int value = _settings.SavedZoomMode;
+
+                if (value < 0 || value > (int)ZoomMode.ActualSize)
+                {
+                    return ZoomMode.FitToWindow;
+                }
+
+                return (ZoomMode)value;
             }
         }
 

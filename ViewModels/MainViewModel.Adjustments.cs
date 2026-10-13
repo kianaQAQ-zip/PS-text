@@ -14,6 +14,7 @@ using PSText.Infrastructure.Imaging;
 using PSText.Models;
 using PSText.Services.Filters;
 using PSText.Services.Interfaces;
+using PSText.Services;
 
 namespace PSText.ViewModels
 {
@@ -100,15 +101,15 @@ namespace PSText.ViewModels
             {
                 if (_history.UndoCount == 0 && _history.RedoCount == 0)
                 {
-                    return string.Format("历史 0/{0} 步 · {1}", _history.MaxSteps, _history.MemoryUsageText);
+                    return string.Format(Loc.T("Adjust_HistoryZero"), _history.MaxSteps, _history.MemoryUsageText);
                 }
 
                 return string.Format(
-                    "历史 {0}/{1} 步 · {2}{3}",
+                    Loc.T("Adjust_HistorySteps"),
                     _history.UndoCount,
                     _history.MaxSteps,
                     _history.MemoryUsageText,
-                    _history.CanRedo ? " · 可重做 " + _history.RedoCount : string.Empty);
+                    _history.CanRedo ? Loc.T("Adjust_Redoable") + _history.RedoCount : string.Empty);
             }
         }
 
@@ -253,7 +254,7 @@ namespace PSText.ViewModels
             }
             catch (Exception ex)
             {
-                HandleError("应用调整失败。", ex, true);
+                HandleError(Loc.T("Adjust_Failed"), ex, true);
             }
         }
 
@@ -359,7 +360,7 @@ namespace PSText.ViewModels
                 Document = currentDocument.WithBitmap(bitmap).WithDpi(currentDocument.DpiX, currentDocument.DpiY);
                 _committedAdjustments = adjustments;
                 LastCommitDiagnostic = string.Format(
-                    "无基准：baseBuffer={0} baseState={1} adjustedBuffer={2}",
+                    Loc.T("Adjust_NoBaseline"),
                     baseBuffer == null ? "null" : "ok",
                     baseState == null ? "null" : "ok",
                     adjustedBuffer == null ? "null" : adjustedBuffer.Width + "x" + adjustedBuffer.Height);
@@ -372,8 +373,8 @@ namespace PSText.ViewModels
                 // 压缩失败（例如极端尺寸）：仍然显示结果，但不入历史，避免内存失控。
                 Document = currentDocument.WithBitmap(bitmap).WithDpi(currentDocument.DpiX, currentDocument.DpiY);
                 _committedAdjustments = adjustments;
-                _lastError = "无法创建历史快照，本次调整不会进入撤销历史。";
-                LastCommitDiagnostic = "快照压缩失败：" + adjustedBuffer.Width + "x" + adjustedBuffer.Height;
+                _lastError = Loc.T("Adjust_SnapshotFailed");
+                LastCommitDiagnostic = Loc.T("Adjust_CompressFailed") + adjustedBuffer.Width + "x" + adjustedBuffer.Height;
                 return;
             }
 
@@ -405,7 +406,7 @@ namespace PSText.ViewModels
             }
 
             StatusMessage = string.Format(
-                "已应用 {0}（{1}）",
+                Loc.T("Adjust_Applied"),
                 adjustments.ToDisplayString(),
                 _history.MemoryUsageText);
         }
@@ -464,7 +465,7 @@ namespace PSText.ViewModels
 
             if (after.Snapshot == null)
             {
-                _lastError = "无法创建历史快照，本次编辑不会进入撤销历史。";
+                _lastError = Loc.T("Adjust_SnapshotFailedEdit");
                 return false;
             }
 
@@ -479,7 +480,7 @@ namespace PSText.ViewModels
             _history.Push(new BufferEditCommand(label, before, after, RestoreState), after);
 
             StatusMessage = string.Format(
-                "已应用「{0}」（{1}，{2}）",
+                Loc.T("Adjust_AppliedNamed"),
                 label,
                 Document.PixelSizeText,
                 _history.MemoryUsageText);
@@ -534,11 +535,11 @@ namespace PSText.ViewModels
 
                 // 标注是叠加层：破坏性操作（滤镜 / 裁剪 / 缩放 / 旋转 / 文字）之前必须先烘进像素，
                 // 否则操作之后所有标注的坐标都会错位。
-                FlattenAnnotations("合并标注（" + label + " 前）");
+                FlattenAnnotations(Loc.T("Adjust_MergedSuffix") + label + Loc.T("Adjust_BeforeSuffix"));
 
                 EditState before = CreateCurrentStateSnapshot();
                 PixelBuffer source = PixelBuffer.FromBitmap(_document.Bitmap);
-                StatusMessage = "正在处理：" + label;
+                StatusMessage = Loc.T("Adjust_Processing") + label;
 
                 PixelBuffer transformed = await transform(source).ConfigureAwait(true);
 
@@ -551,11 +552,11 @@ namespace PSText.ViewModels
             }
             catch (OperationCanceledException)
             {
-                StatusMessage = "已取消：" + label;
+                StatusMessage = Loc.T("Adjust_Canceled") + label;
             }
             catch (Exception ex)
             {
-                HandleError("执行「" + label + "」失败。", ex, true);
+                HandleError(Loc.T("Adjust_Execute") + label + Loc.T("Adjust_ActionFailed"), ex, true);
             }
             finally
             {
@@ -580,7 +581,7 @@ namespace PSText.ViewModels
             BitmapSource bitmap = state.ToBitmap();
             if (bitmap == null)
             {
-                throw new InvalidOperationException("历史快照已失效，无法恢复该步骤。");
+                throw new InvalidOperationException(Loc.T("Adjust_SnapshotExpired"));
             }
 
             _suppressAdjustmentRender = true;
@@ -621,7 +622,7 @@ namespace PSText.ViewModels
             _previewTimer.Stop();
             EndAdjustmentSession();
             _history.Undo();
-            StatusMessage = "已撤销";
+            StatusMessage = Loc.T("Adjust_Undone");
         }
 
         /// <summary>重做。</summary>
@@ -635,7 +636,7 @@ namespace PSText.ViewModels
             _previewTimer.Stop();
             EndAdjustmentSession();
             _history.Redo();
-            StatusMessage = "已重做";
+            StatusMessage = Loc.T("Adjust_Redone");
         }
 
         private void OnHistoryChanged()
@@ -654,25 +655,25 @@ namespace PSText.ViewModels
 
             if (Math.Abs(to.Brightness - from.Brightness) > 0.001)
             {
-                parts.Add("亮度 " + to.Brightness.ToString("+0;-0;0"));
+                parts.Add(Loc.T("Adjust_BrightnessLabel") + to.Brightness.ToString("+0;-0;0"));
             }
 
             if (Math.Abs(to.Contrast - from.Contrast) > 0.001)
             {
-                parts.Add("对比度 " + to.Contrast.ToString("+0;-0;0"));
+                parts.Add(Loc.T("Adjust_ContrastLabel") + to.Contrast.ToString("+0;-0;0"));
             }
 
             if (Math.Abs(to.Saturation - from.Saturation) > 0.001)
             {
-                parts.Add("饱和度 " + to.Saturation.ToString("+0;-0;0"));
+                parts.Add(Loc.T("Adjust_SaturationLabel") + to.Saturation.ToString("+0;-0;0"));
             }
 
             if (Math.Abs(to.Temperature - from.Temperature) > 0.001)
             {
-                parts.Add("色温 " + to.Temperature.ToString("+0;-0;0"));
+                parts.Add(Loc.T("Adjust_TemperatureLabel") + to.Temperature.ToString("+0;-0;0"));
             }
 
-            return parts.Count == 0 ? "基础调整" : string.Join(" / ", parts.ToArray());
+            return parts.Count == 0 ? Loc.T("Adjust_Label") : string.Join(" / ", parts.ToArray());
         }
 
         #endregion

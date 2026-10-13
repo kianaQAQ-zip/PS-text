@@ -5,6 +5,7 @@ using System.Reflection;
 using System.Runtime.InteropServices;
 using Microsoft.Win32;
 using PSText.Services.Interfaces;
+using PSText.Services;
 
 namespace PSText.Services
 {
@@ -42,7 +43,11 @@ namespace PSText.Services
         public const string PrintVerbName = "PSText.Print";
 
         /// <summary>友好名称（"打开方式"里显示的名字）。</summary>
-        public const string FriendlyName = "PS-text 图片编辑器";
+        /// <summary>写进注册表的显示名。跟着界面语言走，所以是 static readonly 而不是 const。</summary>
+        public static string FriendlyName
+        {
+            get { return Loc.T("App_Title"); }
+        }
 
         /// <summary>关联的扩展名（内部使用；对外只暴露数量，避免外部改到这张表）。</summary>
         private static readonly string[] Extensions =
@@ -220,14 +225,14 @@ namespace PSText.Services
         {
             if (string.IsNullOrWhiteSpace(_exePath))
             {
-                return FileAssociationResult.Fail("无法确定程序自身的位置，注册失败。");
+                return FileAssociationResult.Fail(Loc.T("Assoc_ErrorNoExe"));
             }
 
             if (!File.Exists(_exePath))
             {
                 return FileAssociationResult.Fail(
-                    "找不到程序文件：" + Environment.NewLine + _exePath + Environment.NewLine
-                    + "绿色版本请不要在运行期间移动或删除 exe —— 请重新解压后再注册。");
+                    Loc.T("Assoc_ErrorExeMissing") + Environment.NewLine + _exePath + Environment.NewLine
+                    + Loc.T("Assoc_MovedExeWarning"));
             }
 
             try
@@ -237,7 +242,7 @@ namespace PSText.Services
                 // 1) ProgID 本体
                 using (RegistryKey key = CreateKey(_hive, ProgIdPath))
                 {
-                    key.SetValue(null, "PS-text 图片", RegistryValueKind.String);
+                    key.SetValue(null, Loc.T("Assoc_ProgIdFriendly"), RegistryValueKind.String);
                 }
 
                 using (RegistryKey key = CreateKey(_hive, ProgIdPath + @"\DefaultIcon"))
@@ -286,7 +291,7 @@ namespace PSText.Services
                     key.SetValue("ApplicationName", FriendlyName, RegistryValueKind.String);
                     key.SetValue(
                         "ApplicationDescription",
-                        "轻量办公图片处理工具：批量、水印、标注、修补、打印（Windows 7 兼容）",
+                        Loc.T("About_Tagline"),
                         RegistryValueKind.String);
                 }
 
@@ -315,21 +320,21 @@ namespace PSText.Services
             catch (UnauthorizedAccessException ex)
             {
                 return FileAssociationResult.Fail(
-                    "没有权限写入注册表，注册失败。\n\n"
-                    + "可能的原因：\n"
-                    + "· 组策略 / 安全软件禁止程序写注册表；\n"
-                    + "· 当前账户是受限账户。\n\n"
-                    + "文件关联写的是当前用户（HKCU），正常情况下不需要管理员权限；\n"
-                    + "如果这里被拒绝，请检查安全软件或改用管理员身份运行后再注册。\n\n"
+                    Loc.T("Assoc_ErrorDeniedWrite")
+                    + Loc.T("Assoc_ErrorReasonIntro")
+                    + Loc.T("Assoc_ErrorReasonPolicy")
+                    + Loc.T("Assoc_ErrorReasonAccount")
+                    + Loc.T("Assoc_ErrorReasonHkcu")
+                    + Loc.T("Assoc_ErrorAdvice")
                     + "（" + ex.Message + "）");
             }
             catch (System.Security.SecurityException ex)
             {
-                return FileAssociationResult.Fail("安全策略禁止写入注册表，注册失败：" + ex.Message);
+                return FileAssociationResult.Fail(Loc.T("Assoc_ErrorPolicyWrite") + ex.Message);
             }
             catch (IOException ex)
             {
-                return FileAssociationResult.Fail("写入注册表时出错，注册失败：" + ex.Message);
+                return FileAssociationResult.Fail(Loc.T("Assoc_ErrorWrite") + ex.Message);
             }
         }
 
@@ -397,19 +402,19 @@ namespace PSText.Services
                 DeleteKeyIfEmpty(_hive, ShellVerbsRootPath);
 
                 NotifyShell();
-                return FileAssociationResult.Ok("已注销文件关联。文件仍可通过“打开方式 → 选择其他应用”使用。");
+                return FileAssociationResult.Ok(Loc.T("Assoc_UnregisterOk"));
             }
             catch (UnauthorizedAccessException ex)
             {
-                return FileAssociationResult.Fail("没有权限修改注册表，注销失败：" + ex.Message);
+                return FileAssociationResult.Fail(Loc.T("Assoc_ErrorDeniedDelete") + ex.Message);
             }
             catch (System.Security.SecurityException ex)
             {
-                return FileAssociationResult.Fail("安全策略禁止修改注册表，注销失败：" + ex.Message);
+                return FileAssociationResult.Fail(Loc.T("Assoc_ErrorPolicyDelete") + ex.Message);
             }
             catch (IOException ex)
             {
-                return FileAssociationResult.Fail("修改注册表时出错，注销失败：" + ex.Message);
+                return FileAssociationResult.Fail(Loc.T("Assoc_ErrorDelete") + ex.Message);
             }
         }
 
@@ -433,7 +438,7 @@ namespace PSText.Services
 
             using (RegistryKey key = CreateKey(_hive, ShellVerbsRootPath + @"\" + EditVerbName))
             {
-                key.SetValue("MUIVerb", "用 PS-text 编辑", RegistryValueKind.String);
+                key.SetValue("MUIVerb", Loc.T("Assoc_VerbEdit"), RegistryValueKind.String);
                 key.SetValue("Icon", icon, RegistryValueKind.String);
             }
 
@@ -444,7 +449,7 @@ namespace PSText.Services
 
             using (RegistryKey key = CreateKey(_hive, ShellVerbsRootPath + @"\" + PrintVerbName))
             {
-                key.SetValue("MUIVerb", "用 PS-text 打印", RegistryValueKind.String);
+                key.SetValue("MUIVerb", Loc.T("Assoc_VerbPrint"), RegistryValueKind.String);
                 key.SetValue("Icon", icon, RegistryValueKind.String);
             }
 
@@ -481,7 +486,7 @@ namespace PSText.Services
         {
             if (GetState() != FileAssociationState.Registered)
             {
-                return FileAssociationResult.Fail("请先注册文件关联，然后才能在这里把 PS-text 设为默认打开程序。");
+                return FileAssociationResult.Fail(Loc.T("Assoc_NeedRegisterFirst"));
             }
 
             try
@@ -496,24 +501,24 @@ namespace PSText.Services
                     return FileAssociationResult.Fail(
                         string.Format(
                             CultureInfo.InvariantCulture,
-                            "系统未能打开“设置默认程序”界面（HRESULT 0x{0:X8}）。请从控制面板 → 默认程序进入。",
+                            Loc.T("Assoc_OpenDefaultAppsFailed"),
                             hr));
                 }
 
                 return FileAssociationResult.Ok(
-                    "已打开系统的“设置默认程序”界面。在列表里选择 PS-text，"
-                    + "即可把 PS-text 设为 jpg / png 等图片的默认打开程序。");
+                    Loc.T("Assoc_OpenDefaultAppsOk")
+                    + Loc.T("Assoc_OpenDefaultAppsHint"));
             }
             catch (COMException ex)
             {
                 return FileAssociationResult.Fail(
-                    "当前系统不支持直接打开“设置默认程序”界面，请从控制面板 → 默认程序手动设置。"
+                    Loc.T("Assoc_OpenDefaultAppsUnsupported")
                     + Environment.NewLine + "（" + ex.Message + "）");
             }
             catch (InvalidCastException ex)
             {
                 return FileAssociationResult.Fail(
-                    "当前系统不支持直接打开“设置默认程序”界面，请从控制面板 → 默认程序手动设置。"
+                    Loc.T("Assoc_OpenDefaultAppsUnsupported")
                     + Environment.NewLine + "（" + ex.Message + "）");
             }
         }
@@ -528,7 +533,7 @@ namespace PSText.Services
 
             if (key == null)
             {
-                throw new IOException("无法创建注册表项：" + path);
+                throw new IOException(Loc.T("Assoc_ErrorCreateKey") + path);
             }
 
             return key;
@@ -624,9 +629,9 @@ namespace PSText.Services
         {
             return string.Format(
                 CultureInfo.InvariantCulture,
-                "已注册文件关联。{0} 现在会出现在 {1} 种图片扩展名的“打开方式”列表里，"
-                + "右键菜单里也会多出“用 PS-text 编辑 / 打印”两项。\n\n"
-                + "默认打开程序不会被改动，如需设为默认请在系统的“设置默认程序”里选择。",
+                Loc.T("Assoc_RegisterOk")
+                + Loc.T("Assoc_ContextMenuNote")
+                + Loc.T("Assoc_RegisterNote"),
                 FriendlyName,
                 Extensions.Length);
         }

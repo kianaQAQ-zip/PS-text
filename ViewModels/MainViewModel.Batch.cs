@@ -22,7 +22,7 @@ namespace PSText.ViewModels
     /// <summary>批量队列中的一项。</summary>
     public sealed class BatchItemViewModel : ObservableObject
     {
-        private string _status = "待处理";
+        private string _status = Loc.T("Batch_StatusPending");
         private string _outputPath;
         private bool _isFailed;
 
@@ -179,16 +179,16 @@ namespace PSText.ViewModels
 
         private readonly List<BatchStepKindOption> _batchStepKindOptions = new List<BatchStepKindOption>
         {
-            new BatchStepKindOption(BatchStepKind.Resize, "尺寸缩放"),
-            new BatchStepKindOption(BatchStepKind.Adjustments, "基础调整"),
-            new BatchStepKindOption(BatchStepKind.FlipRotate, "翻转旋转"),
-            new BatchStepKindOption(BatchStepKind.Border, "边框"),
-            new BatchStepKindOption(BatchStepKind.Watermark, "文字水印")
+            new BatchStepKindOption(BatchStepKind.Resize, Loc.T("Batch_Resize")),
+            new BatchStepKindOption(BatchStepKind.Adjustments, Loc.T("Adjust_Label")),
+            new BatchStepKindOption(BatchStepKind.FlipRotate, Loc.T("Batch_RotateFlip")),
+            new BatchStepKindOption(BatchStepKind.Border, Loc.T("Border_Header")),
+            new BatchStepKindOption(BatchStepKind.Watermark, Loc.T("Batch_Watermark"))
         };
 
         private readonly List<BatchOutputFormatOption> _batchOutputFormatOptions = new List<BatchOutputFormatOption>
         {
-            new BatchOutputFormatOption(ImageFileFormat.Unknown, "沿用原格式"),
+            new BatchOutputFormatOption(ImageFileFormat.Unknown, Loc.T("Batch_KeepFormat")),
             new BatchOutputFormatOption(ImageFileFormat.Jpeg, "JPEG"),
             new BatchOutputFormatOption(ImageFileFormat.Png, "PNG"),
             new BatchOutputFormatOption(ImageFileFormat.Bmp, "BMP"),
@@ -222,11 +222,11 @@ namespace PSText.ViewModels
         private BatchStepKind _batchNewStepKind = BatchStepKind.Resize;
         private BatchOutputFormatOption _batchOutputFormat;
         private string _batchOutputDirectory;
-        private string _batchFileNameSuffix = "_批量";
+        private string _batchFileNameSuffix = Loc.T("Batch_TabShort");
         private int _batchJpegQuality = 92;
         private bool _batchIncludeSubfolders;
         private BitmapSource _batchPreviewImage;
-        private string _batchPreviewText = "从上方队列里选一张图片，即可看到当前流水线的效果。";
+        private string _batchPreviewText = Loc.T("Batch_PreviewSelect");
         private bool _isBatchPreviewLoading;
         private int _batchPreviewRevision;
         private bool _isBatchRunning;
@@ -382,22 +382,22 @@ namespace PSText.ViewModels
         {
             get
             {
-                string format = BatchOutputFormat == null ? "沿用原格式" : BatchOutputFormat.Name;
+                string format = BatchOutputFormat == null ? Loc.T("Batch_KeepFormat") : BatchOutputFormat.Name;
 
                 if (IsBatchQualityEnabled)
                 {
-                    format += "（质量 " + _batchJpegQuality.ToString(CultureInfo.InvariantCulture) + "）";
+                    format += Loc.T("Batch_QualityPrefix") + _batchJpegQuality.ToString(CultureInfo.InvariantCulture) + "）";
                 }
 
                 string directory = string.IsNullOrWhiteSpace(_batchOutputDirectory)
-                    ? "尚未选择输出目录"
+                    ? Loc.T("Batch_NoOutputDir")
                     : _batchOutputDirectory;
 
                 return string.Format(
                     CultureInfo.InvariantCulture,
-                    "{0} · 后缀「{1}」 · {2}",
+                    Loc.T("Batch_SuffixFmt"),
                     format,
-                    string.IsNullOrEmpty(_batchFileNameSuffix) ? "（无）" : _batchFileNameSuffix,
+                    string.IsNullOrEmpty(_batchFileNameSuffix) ? Loc.T("Common_None") : _batchFileNameSuffix,
                     directory);
             }
         }
@@ -414,7 +414,7 @@ namespace PSText.ViewModels
 
                 if (string.IsNullOrWhiteSpace(_batchOutputDirectory))
                 {
-                    return "选择输出目录后显示预计输出路径";
+                    return Loc.T("Batch_PreviewPlaceholder");
                 }
 
                 try
@@ -424,7 +424,7 @@ namespace PSText.ViewModels
                     string note;
                     ResolveBatchOutputSettings(_selectedBatchItem.FilePath, out format, out extension, out note);
                     BatchOutputNaming naming = new BatchOutputNaming(_batchOutputDirectory, _batchFileNameSuffix, extension);
-                    return "预计输出：" + naming.PreviewPath(_selectedBatchItem.FilePath);
+                    return Loc.T("Batch_PreviewExpected") + naming.PreviewPath(_selectedBatchItem.FilePath);
                 }
                 catch (ArgumentException)
                 {
@@ -672,7 +672,7 @@ namespace PSText.ViewModels
                 initialDirectory = SafeGetDirectory(_selectedBatchItem.FilePath);
             }
 
-            IReadOnlyList<string> files = _dialogService.ShowOpenImagesDialog("选择要批量处理的图片", initialDirectory);
+            IReadOnlyList<string> files = _dialogService.ShowOpenImagesDialog(Loc.T("Batch_PickImages"), initialDirectory);
 
             if (files == null || files.Count == 0)
             {
@@ -690,12 +690,12 @@ namespace PSText.ViewModels
             }
 
             RefreshBatchQueueState();
-            StatusMessage = string.Format(CultureInfo.InvariantCulture, "已加入 {0} 张图片到批量队列。", added);
+            StatusMessage = string.Format(CultureInfo.InvariantCulture, Loc.T("Batch_Added"), added);
         }
 
         private void AddBatchFolder()
         {
-            string folder = _dialogService.ShowFolderDialog("选择要批量处理的文件夹", _batchOutputDirectory);
+            string folder = _dialogService.ShowFolderDialog(Loc.T("Batch_PickFolder"), _batchOutputDirectory);
 
             if (string.IsNullOrWhiteSpace(folder))
             {
@@ -711,7 +711,7 @@ namespace PSText.ViewModels
             }
             catch (Exception ex)
             {
-                HandleError("读取文件夹失败。", ex, true);
+                HandleError(Loc.T("Batch_FolderReadFailed"), ex, true);
                 return;
             }
 
@@ -736,12 +736,12 @@ namespace PSText.ViewModels
             if (added == 0)
             {
                 _dialogService.ShowInformation(
-                    "这个文件夹里没有找到支持的图片（jpg / png / bmp / tif / gif）。",
-                    "批量处理");
+                    Loc.T("Batch_NoSupportedImages"),
+                    Loc.T("Batch_Label"));
             }
             else
             {
-                StatusMessage = string.Format(CultureInfo.InvariantCulture, "已从文件夹加入 {0} 张图片。", added);
+                StatusMessage = string.Format(CultureInfo.InvariantCulture, Loc.T("Batch_AddedFolder"), added);
             }
         }
 
@@ -755,19 +755,19 @@ namespace PSText.ViewModels
             if (string.IsNullOrEmpty(_document.FilePath))
             {
                 _dialogService.ShowInformation(
-                    "当前图片尚未保存到文件，无法加入批量队列。请先保存后再添加。",
-                    "批量处理");
+                    Loc.T("Batch_NeedSave"),
+                    Loc.T("Batch_Label"));
                 return;
             }
 
             if (AddBatchQueueItem(_document.FilePath))
             {
                 RefreshBatchQueueState();
-                StatusMessage = "已把当前图片加入批量队列。";
+                StatusMessage = Loc.T("Batch_AddedCurrent");
             }
             else
             {
-                _dialogService.ShowInformation("这张图片已经在队列里了。", "批量处理");
+                _dialogService.ShowInformation(Loc.T("Batch_AlreadyInQueue"), Loc.T("Batch_Label"));
             }
         }
 
@@ -834,7 +834,7 @@ namespace PSText.ViewModels
             _batchSteps.Add(viewModel);
             SelectedBatchStep = viewModel;
             RefreshBatchStepState();
-            StatusMessage = string.Format(CultureInfo.InvariantCulture, "已添加步骤：{0}", step.DisplayName);
+            StatusMessage = string.Format(CultureInfo.InvariantCulture, Loc.T("Batch_StepAdded"), step.DisplayName);
         }
 
         private static IBatchStep CreateBatchStep(BatchStepKind kind)
@@ -1015,7 +1015,9 @@ namespace PSText.ViewModels
                 "BatchBorderStyle", "BatchBorderWidth", "BatchBorderColorText",
                 "BatchWatermarkText", "BatchWatermarkFontSizeMode", "BatchWatermarkFontSize",
                 "BatchWatermarkMargin", "BatchWatermarkOpacity", "BatchWatermarkAnchor",
-                "BatchWatermarkBold", "BatchWatermarkShadow", "BatchWatermarkColorText"
+                "BatchWatermarkBold", "BatchWatermarkShadow", "BatchWatermarkColorText",
+                "BatchWatermarkLayoutIndex", "IsBatchWatermarkTiled",
+                "BatchTileSpacingX", "BatchTileSpacingY", "BatchTileAngle"
             };
 
             for (int i = 0; i < names.Length; i++)
@@ -1371,7 +1373,7 @@ namespace PSText.ViewModels
             get
             {
                 BatchBorderStep step = SelectedBorderStep;
-                return step == null ? "白色" : BatchColorNames.Describe(step.Color);
+                return step == null ? Loc.T("Common_White") : BatchColorNames.Describe(step.Color);
             }
         }
 
@@ -1569,7 +1571,114 @@ namespace PSText.ViewModels
             get
             {
                 BatchWatermarkStep step = SelectedWatermarkStep;
-                return step == null ? "白色" : BatchColorNames.Describe(step.Color);
+                return step == null ? Loc.T("Common_White") : BatchColorNames.Describe(step.Color);
+            }
+        }
+
+        /// <summary>水印排布方式：0 = 单点，1 = 平铺。</summary>
+        public int BatchWatermarkLayoutIndex
+        {
+            get
+            {
+                BatchWatermarkStep step = SelectedWatermarkStep;
+                return step != null && step.Layout == TextLayout.Tile ? 1 : 0;
+            }
+            set
+            {
+                TextLayout layout = value == 1 ? TextLayout.Tile : TextLayout.Single;
+
+                UpdateSelectedBatchStep(step =>
+                {
+                    BatchWatermarkStep watermark = step as BatchWatermarkStep;
+                    if (watermark != null)
+                    {
+                        watermark.Layout = layout;
+                    }
+                });
+
+                OnPropertyChanged("BatchWatermarkLayoutIndex");
+                OnPropertyChanged("IsBatchWatermarkTiled");
+            }
+        }
+
+        /// <summary>选中的水印步骤是否处于平铺模式（界面据此显示间距 / 角度）。</summary>
+        public bool IsBatchWatermarkTiled
+        {
+            get { return BatchWatermarkLayoutIndex == 1; }
+        }
+
+        /// <summary>平铺的水平间距（占图像宽度的百分比）。</summary>
+        public double BatchTileSpacingX
+        {
+            get
+            {
+                BatchWatermarkStep step = SelectedWatermarkStep;
+                return step == null ? 25.0 : step.TileSpacingX;
+            }
+            set
+            {
+                double safe = double.IsNaN(value) ? 25.0 : value;
+
+                UpdateSelectedBatchStep(step =>
+                {
+                    BatchWatermarkStep watermark = step as BatchWatermarkStep;
+                    if (watermark != null)
+                    {
+                        watermark.TileSpacingX = safe;
+                    }
+                });
+
+                OnPropertyChanged("BatchTileSpacingX");
+            }
+        }
+
+        /// <summary>平铺的垂直间距（占图像高度的百分比）。</summary>
+        public double BatchTileSpacingY
+        {
+            get
+            {
+                BatchWatermarkStep step = SelectedWatermarkStep;
+                return step == null ? 18.0 : step.TileSpacingY;
+            }
+            set
+            {
+                double safe = double.IsNaN(value) ? 18.0 : value;
+
+                UpdateSelectedBatchStep(step =>
+                {
+                    BatchWatermarkStep watermark = step as BatchWatermarkStep;
+                    if (watermark != null)
+                    {
+                        watermark.TileSpacingY = safe;
+                    }
+                });
+
+                OnPropertyChanged("BatchTileSpacingY");
+            }
+        }
+
+        /// <summary>平铺的倾斜角度（度）。</summary>
+        public double BatchTileAngle
+        {
+            get
+            {
+                BatchWatermarkStep step = SelectedWatermarkStep;
+                return step == null ? -30.0 : step.TileAngle;
+            }
+            set
+            {
+                double safe = double.IsNaN(value) ? 0.0 : value;
+
+                UpdateSelectedBatchStep(step =>
+                {
+                    BatchWatermarkStep watermark = step as BatchWatermarkStep;
+                    if (watermark != null)
+                    {
+                        watermark.TileAngle = safe;
+                    }
+                });
+
+                OnPropertyChanged("BatchTileAngle");
             }
         }
 
@@ -1616,7 +1725,7 @@ namespace PSText.ViewModels
                 initial = SafeGetDirectory(_document.FilePath);
             }
 
-            string folder = _dialogService.ShowFolderDialog("选择批量输出的文件夹", initial);
+            string folder = _dialogService.ShowFolderDialog(Loc.T("Batch_PickOutput"), initial);
 
             if (string.IsNullOrWhiteSpace(folder))
             {
@@ -1651,7 +1760,7 @@ namespace PSText.ViewModels
                 {
                     format = ImageFileFormat.Png;
                     forcedExtension = ".png";
-                    note = "源文件是 GIF，已改写为 PNG（GIF 只有 256 色且多帧会被压成单帧）";
+                    note = Loc.T("Batch_KeepFormatGif");
                     return;
                 }
 
@@ -1661,7 +1770,7 @@ namespace PSText.ViewModels
                 {
                     format = ImageFileFormat.Png;
                     forcedExtension = ".png";
-                    note = "无法识别源格式，已按 PNG 保存";
+                    note = Loc.T("Batch_FormatUnknownPng");
                 }
 
                 return;
@@ -1688,7 +1797,7 @@ namespace PSText.ViewModels
             if (_selectedBatchItem == null)
             {
                 BatchPreviewImage = null;
-                BatchPreviewText = "从上方队列里选一张图片，即可看到当前流水线的效果。";
+                BatchPreviewText = Loc.T("Batch_PreviewSelect");
                 return;
             }
 
@@ -1722,7 +1831,7 @@ namespace PSText.ViewModels
                 BatchPreviewImage = null;
                 BatchPreviewOutputWidth = 0;
                 BatchPreviewOutputHeight = 0;
-                BatchPreviewText = "从上方队列里选一张图片，即可看到当前流水线的效果。";
+                BatchPreviewText = Loc.T("Batch_PreviewSelect");
                 return;
             }
 
@@ -1764,7 +1873,7 @@ namespace PSText.ViewModels
 
                 BatchPreviewText = string.Format(
                     CultureInfo.InvariantCulture,
-                    "预览（{0}×{1} 降采样）· 流水线：{2} · 实际输出约 {3} × {4} px",
+                    Loc.T("Batch_PreviewInfo"),
                     small.Width,
                     small.Height,
                     BatchPipeliner.Describe(steps),
@@ -1778,7 +1887,7 @@ namespace PSText.ViewModels
                     BatchPreviewImage = null;
                     BatchPreviewOutputWidth = 0;
                     BatchPreviewOutputHeight = 0;
-                    BatchPreviewText = "预览失败：" + ex.Message;
+                    BatchPreviewText = Loc.T("Batch_PreviewFailed") + ex.Message;
                 }
             }
             finally
@@ -1810,7 +1919,7 @@ namespace PSText.ViewModels
 
             if (string.IsNullOrWhiteSpace(_batchOutputDirectory))
             {
-                _dialogService.ShowInformation("请先选择输出文件夹。", "批量处理");
+                _dialogService.ShowInformation(Loc.T("Batch_NeedOutputDir"), Loc.T("Batch_Label"));
                 return;
             }
 
@@ -1820,23 +1929,23 @@ namespace PSText.ViewModels
             string suffix = BatchOutputNaming.SanitizeFileNamePart(_batchFileNameSuffix);
             string outputDirectory = _batchOutputDirectory;
 
-            string formatText = BatchOutputFormat == null ? "沿用原格式" : BatchOutputFormat.Name;
+            string formatText = BatchOutputFormat == null ? Loc.T("Batch_KeepFormat") : BatchOutputFormat.Name;
 
             if (IsBatchQualityEnabled)
             {
-                formatText += "（质量 " + _batchJpegQuality.ToString(CultureInfo.InvariantCulture) + "）";
+                formatText += Loc.T("Batch_QualityPrefix") + _batchJpegQuality.ToString(CultureInfo.InvariantCulture) + "）";
             }
 
             string message = string.Format(
                 CultureInfo.InvariantCulture,
-                "将处理 {0} 张图片。\n\n流水线：{1}\n输出格式：{2}\n文件名：原名 + 「{3}」（重名自动加序号）\n输出到：{4}\n\n原文件不会被改动。开始处理吗？",
+                Loc.T("Batch_ConfirmBody"),
                 items.Count,
                 BatchPipeliner.Describe(steps),
                 formatText,
-                string.IsNullOrEmpty(suffix) ? "（无后缀）" : suffix,
+                string.IsNullOrEmpty(suffix) ? Loc.T("Batch_NoSuffix") : suffix,
                 outputDirectory);
 
-            if (_dialogService.Confirm(message, "批量处理") != ConfirmResult.Yes)
+            if (_dialogService.Confirm(message, Loc.T("Batch_Label")) != ConfirmResult.Yes)
             {
                 return;
             }
@@ -1855,17 +1964,17 @@ namespace PSText.ViewModels
             }
             catch (Exception ex)
             {
-                HandleError("无法创建输出目录。", ex, true);
+                HandleError(Loc.T("Batch_OutputDirFailed"), ex, true);
                 return;
             }
 
             CancellationTokenSource cts = new CancellationTokenSource();
             _batchRunCts = cts;
-            _batchRunMessage = "正在批量处理…";
+            _batchRunMessage = Loc.T("Batch_Running");
             IsBatchRunning = true;
             OnPropertyChanged("BatchRunProgressText");
 
-            ProgressReporter progress = CreateProgressReporter("正在批量处理…");
+            ProgressReporter progress = CreateProgressReporter(Loc.T("Batch_Running"));
 
             try
             {
@@ -1875,16 +1984,16 @@ namespace PSText.ViewModels
 
                     if (cts.IsCancellationRequested)
                     {
-                        item.Status = "已取消";
+                        item.Status = Loc.T("Batch_StatusCanceled");
                         canceled++;
                         _batchRunCompleted = i + 1;
                         OnPropertyChanged("BatchRunProgressText");
-                        progress.Report((i + 1) / (double)items.Count, "已取消（" + (i + 1) + "/" + items.Count + "）");
+                        progress.Report((i + 1) / (double)items.Count, Loc.T("Adjust_CanceledPrefix") + (i + 1) + "/" + items.Count + "）");
                         continue;
                     }
 
                     item.IsFailed = false;
-                    item.Status = "正在处理…";
+                    item.Status = Loc.T("Batch_StatusRunning");
 
                     try
                     {
@@ -1919,7 +2028,13 @@ namespace PSText.ViewModels
                             Format = format,
                             QualityLevel = _batchJpegQuality,
                             TiffCompression = "LZW",
-                            PreserveDpi = true
+                            PreserveDpi = true,
+
+                            // 每张图各自的 EXIF / ICC：只给编码方**源文件路径**，
+                            // 让它在自己线程上重读（BitmapMetadata 有线程亲和性，不能跨线程传）。
+                            // 统一转格式时格式不匹配，编码方会丢弃并写进 MetadataNote。
+                            PreserveMetadata = document.HasSourceMetadata || document.HasColorProfile,
+                            MetadataSourcePath = document.FilePath
                         };
 
                         long bytes = await _imageService
@@ -1929,22 +2044,23 @@ namespace PSText.ViewModels
                         item.OutputPath = outputPath;
                         item.Status = string.Format(
                             CultureInfo.InvariantCulture,
-                            "完成 · {0} × {1} px · {2}{3}",
+                            Loc.T("Batch_StatusDone"),
                             result.Width,
                             result.Height,
                             FormatBytes(bytes),
-                            formatNote == null ? string.Empty : " · " + formatNote);
+                            formatNote == null ? string.Empty : " · " + formatNote,
+                            string.IsNullOrEmpty(options.MetadataNote) ? string.Empty : " · " + options.MetadataNote);
 
                         succeeded++;
                     }
                     catch (OperationCanceledException)
                     {
-                        item.Status = "已取消";
+                        item.Status = Loc.T("Batch_StatusCanceled");
                         canceled++;
                     }
                     catch (Exception ex)
                     {
-                        item.Status = "失败：" + ex.Message;
+                        item.Status = Loc.T("Print_FailedSuffix") + ex.Message;
                         item.IsFailed = true;
                         failed++;
                     }
@@ -1955,7 +2071,7 @@ namespace PSText.ViewModels
                         _batchRunCompleted / (double)Math.Max(1, items.Count),
                         string.Format(
                             CultureInfo.InvariantCulture,
-                            "正在批量处理（{0}/{1}）：{2}",
+                            Loc.T("Batch_Progress"),
                             _batchRunCompleted,
                             items.Count,
                             item.FileName));
@@ -1963,10 +2079,10 @@ namespace PSText.ViewModels
 
                 _batchRunMessage = string.Format(
                     CultureInfo.InvariantCulture,
-                    "批量处理完成：成功 {0}，失败 {1}{2}",
+                    Loc.T("Batch_Done"),
                     succeeded,
                     failed,
-                    canceled > 0 ? "，取消 " + canceled : string.Empty);
+                    canceled > 0 ? Loc.T("Batch_CanceledSuffix") + canceled : string.Empty);
 
                 StatusMessage = _batchRunMessage;
 
@@ -1975,15 +2091,15 @@ namespace PSText.ViewModels
                     _dialogService.ShowInformation(
                         string.Format(
                             CultureInfo.InvariantCulture,
-                            "{0}\n\n失败项可在队列里查看原因（状态列标红）。",
+                            Loc.T("Batch_DoneHint"),
                             _batchRunMessage),
-                        "批量处理");
+                        Loc.T("Batch_Label"));
                 }
             }
             catch (Exception ex)
             {
-                HandleError("批量处理过程中出错。", ex, true);
-                _batchRunMessage = "批量处理中断";
+                HandleError(Loc.T("Batch_Error"), ex, true);
+                _batchRunMessage = Loc.T("Batch_Interrupted");
             }
             finally
             {

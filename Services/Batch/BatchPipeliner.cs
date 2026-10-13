@@ -4,6 +4,7 @@ using System.Globalization;
 using System.Text;
 using System.Threading;
 using PSText.Infrastructure.Imaging;
+using PSText.Services;
 
 namespace PSText.Services.Batch
 {
@@ -69,7 +70,7 @@ namespace PSText.Services.Batch
                     throw new InvalidOperationException(
                         string.Format(
                             CultureInfo.InvariantCulture,
-                            "流水线第 {0} 步（{1}）没有返回结果。",
+                            Loc.T("Batch_ReasonNoResult"),
                             i + 1,
                             step.DisplayName));
                 }
@@ -85,7 +86,7 @@ namespace PSText.Services.Batch
         {
             if (steps == null || steps.Count == 0)
             {
-                return "（没有步骤，只做格式转换）";
+                return Loc.T("Batch_ReasonFormatOnly");
             }
 
             StringBuilder builder = new StringBuilder();
@@ -105,7 +106,7 @@ namespace PSText.Services.Batch
                 builder.Append(steps[i].DisplayName);
             }
 
-            return builder.Length == 0 ? "（没有步骤，只做格式转换）" : builder.ToString();
+            return builder.Length == 0 ? Loc.T("Batch_ReasonFormatOnly") : builder.ToString();
         }
 
         private static PixelBuffer CopyOf(IReadOnlyPixelBuffer source, CancellationToken cancellationToken)

@@ -5,6 +5,7 @@ using System.Windows;
 using System.Windows.Input;
 using System.Windows.Media;
 using PSText.Infrastructure.Behaviors;
+using PSText.Services;
 using PSText.ViewModels;
 
 namespace PSText.Views
@@ -44,6 +45,14 @@ namespace PSText.Views
 
         private void OnWindowLoaded(object sender, RoutedEventArgs e)
         {
+            // 先恢复窗口位置，再回传视口尺寸 —— 顺序反了的话，
+            // "适应窗口"会按旧尺寸算一次缩放，然后窗口一变又算一次（画面会跳一下）。
+            if (!_windowPlacementRestored)
+            {
+                _windowPlacementRestored = true;
+                RestoreWindowPlacement();
+            }
+
             ReportScreenDpi();
             ReportViewportSize();
 
@@ -179,7 +188,7 @@ namespace PSText.Views
 
                     case Key.R:
                         viewModel.RefreshRecentFileExistence();
-                        StatusHint("已刷新最近文件状态");
+                        StatusHint(Loc.T("Status_RecentRefreshed"));
                         e.Handled = true;
                         return;
 
@@ -342,7 +351,7 @@ namespace PSText.Views
                 return;
             }
 
-            StatusHint("当前状态下该操作不可用");
+            StatusHint(Loc.T("Common_Unavailable"));
         }
 
         private void StatusHint(string message)
@@ -383,9 +392,94 @@ namespace PSText.Views
         /// </summary>
         private bool _closeApproved;
 
+        /// <summary>窗口位置是否已经恢复过（只在第一次 Loaded 时做）。</summary>
+        private bool _windowPlacementRestored;
+
+        /// <summary>关闭时是否已经保存过窗口状态（避免被取消的那次关闭重复写盘）。</summary>
+        private bool _windowPlacementSaved;
+
+        /// <summary>
+        /// 恢复上次的窗口位置与面板宽度。
+        ///
+        /// 必须先做**屏幕校验**：显示器配置会变（家里双屏、公司单屏），
+        /// 保存下来的坐标很可能落在已经不存在的显示器上 —— 那时窗口会出现在可视区域之外，
+        /// 用户看到的是"程序启动了但没界面"，比不恢复位置糟得多。
+        /// </summary>
+        private void RestoreWindowPlacement()
+        {
+            MainViewModel viewModel = ViewModel;
+
+            if (viewModel == null)
+            {
+                return;
+            }
+
+            Rect? saved = viewModel.SavedWindowBounds;
+
+            if (saved != null)
+            {
+                Rect fitted;
+
+                if (WindowPlacement.TryFit(saved.Value, WindowPlacement.GetWorkAreasInDips(this), out fitted))
+                {
+                    WindowStartupLocation = WindowStartupLocation.Manual;
+                    Left = fitted.Left;
+                    Top = fitted.Top;
+                    Width = fitted.Width;
+                    Height = fitted.Height;
+                }
+
+                // 校验不过就什么都不做：保持 XAML 里的默认尺寸并让系统居中 ——
+                // 这是"最坏情况仍然可用"的选择。
+            }
+
+            double panelWidth = viewModel.SavedPanelWidth;
+
+            if (panelWidth > 0.0 && EditorPanelColumn != null)
+            {
+                EditorPanelColumn.Width = new GridLength(panelWidth);
+            }
+
+            if (viewModel.SavedWindowMaximized && WindowState == WindowState.Normal)
+            {
+                WindowState = WindowState.Maximized;
+            }
+        }
+
+        private void SaveWindowPlacement()
+        {
+            if (_windowPlacementSaved)
+            {
+                return;
+            }
+
+            _windowPlacementSaved = true;
+
+            MainViewModel viewModel = ViewModel;
+
+            if (viewModel == null)
+            {
+                return;
+            }
+
+            // 最大化时 Left/Top/Width/Height 是最大化后的值，用它会把"还原后的尺寸"记错，
+            // 所以这时要用 RestoreBounds。
+            Rect bounds = WindowState == WindowState.Normal
+                ? new Rect(Left, Top, Width, Height)
+                : RestoreBounds;
+
+            double panelWidth = EditorPanelColumn == null ? 0.0 : EditorPanelColumn.ActualWidth;
+
+            viewModel.SaveWindowState(bounds, WindowState == WindowState.Maximized, panelWidth);
+        }
+
         protected override void OnClosing(CancelEventArgs e)
         {
             base.OnClosing(e);
+
+            // 先记窗口状态再走关闭流程：即使用户在"未保存"对话框里选了取消，
+            // 记住窗口位置也无害（下次打开还在原处）。
+            SaveWindowPlacement();
 
             if (e.Cancel || _closeApproved)
             {

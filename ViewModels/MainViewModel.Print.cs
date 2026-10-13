@@ -19,7 +19,7 @@ namespace PSText.ViewModels
     /// <summary>批量打印队列中的一项。</summary>
     public sealed class BatchPrintItem : ObservableObject
     {
-        private string _status = "等待打印";
+        private string _status = Loc.T("Print_Waiting");
 
         public BatchPrintItem(string filePath, string fileName)
         {
@@ -232,16 +232,16 @@ namespace PSText.ViewModels
 
                 if (layout == null)
                 {
-                    _dialogService.ShowError("无法计算打印版面，请检查打印机设置。", "打印失败");
+                    _dialogService.ShowError(Loc.T("Print_LayoutFailedHint"), Loc.T("Print_Failed"));
                     return;
                 }
 
                 _printService.Print(request, document.Bitmap, document.DpiX, document.DpiY, layout);
-                StatusMessage = string.Format("已发送到打印机：{0}", document.FileName);
+                StatusMessage = string.Format(Loc.T("Print_Sent"), document.FileName);
             }
             catch (Exception ex)
             {
-                HandleError("打印失败。", ex, true);
+                HandleError(Loc.T("Print_FailedBody"), ex, true);
             }
         }
 
@@ -294,17 +294,17 @@ namespace PSText.ViewModels
 
                 if (layout == null)
                 {
-                    _dialogService.ShowError("无法计算打印版面，请检查打印机设置。", "打印失败");
+                    _dialogService.ShowError(Loc.T("Print_LayoutFailedHint"), Loc.T("Print_Failed"));
                     return;
                 }
 
                 _printService.Print(request, document.Bitmap, document.DpiX, document.DpiY, layout);
                 StatusMessage = string.Format(
-                    "已发送到打印机：{0}（{1}）", document.FileName, previewViewModel.PageText);
+                    Loc.T("Print_SentWithPages"), document.FileName, previewViewModel.PageText);
             }
             catch (Exception ex)
             {
-                HandleError("打印失败。", ex, true);
+                HandleError(Loc.T("Print_FailedBody"), ex, true);
             }
         }
 
@@ -345,8 +345,8 @@ namespace PSText.ViewModels
             if (string.IsNullOrEmpty(path))
             {
                 _dialogService.ShowInformation(
-                    "当前图片尚未保存到文件，无法加入批量打印队列。请先保存后再添加。",
-                    "批量打印");
+                    Loc.T("Print_NeedSave"),
+                    Loc.T("Print_Batch"));
                 return;
             }
 
@@ -359,7 +359,7 @@ namespace PSText.ViewModels
                 ? SafeGetDirectory(_document.FilePath)
                 : null;
 
-            IReadOnlyList<string> files = _dialogService.ShowOpenImagesDialog("选择要批量打印的图片", initialDirectory);
+            IReadOnlyList<string> files = _dialogService.ShowOpenImagesDialog(Loc.T("Print_PickImages"), initialDirectory);
 
             if (files == null || files.Count == 0)
             {
@@ -419,8 +419,8 @@ namespace PSText.ViewModels
         private void UpdateBatchStatus()
         {
             _batchStatus = _batchItems.Count == 0
-                ? "队列为空"
-                : string.Format("队列共 {0} 张", _batchItems.Count);
+                ? Loc.T("Print_QueueEmpty")
+                : string.Format(Loc.T("Print_QueueCount"), _batchItems.Count);
 
             OnPropertyChanged("BatchProgressText");
         }
@@ -438,7 +438,7 @@ namespace PSText.ViewModels
 
             try
             {
-                PrintRequest request = _printService.ShowPrintDialog("批量打印");
+                PrintRequest request = _printService.ShowPrintDialog(Loc.T("Print_Batch"));
 
                 if (request == null)
                 {
@@ -447,7 +447,7 @@ namespace PSText.ViewModels
 
                 List<BatchPrintItem> snapshot = new List<BatchPrintItem>(_batchItems);
                 _batchCompleted = 0;
-                _batchStatus = "正在批量打印…";
+                _batchStatus = Loc.T("Print_BatchRunning");
                 IsBatchPrinting = true;
                 OnPropertyChanged("BatchProgressText");
 
@@ -455,7 +455,7 @@ namespace PSText.ViewModels
             }
             catch (Exception ex)
             {
-                HandleError("批量打印失败。", ex, true);
+                HandleError(Loc.T("Print_BatchFailed"), ex, true);
                 IsBatchPrinting = false;
             }
         }
@@ -464,7 +464,7 @@ namespace PSText.ViewModels
         {
             // 由 UI 命令触发的长流程；内部已全包 try/catch，异常不会逃逸。
             // 使用进度上报器：只有超过 200ms 才会显示进度界面（需求 P3-15）。
-            ProgressReporter progress = CreateProgressReporter("正在批量打印…");
+            ProgressReporter progress = CreateProgressReporter(Loc.T("Print_BatchRunning"));
 
             try
             {
@@ -474,7 +474,7 @@ namespace PSText.ViewModels
                 for (int i = 0; i < items.Count; i++)
                 {
                     BatchPrintItem item = items[i];
-                    item.Status = "正在打印…";
+                    item.Status = Loc.T("Print_Running");
 
                     try
                     {
@@ -492,16 +492,16 @@ namespace PSText.ViewModels
 
                         if (layout == null)
                         {
-                            throw new InvalidOperationException("无法计算打印版面。");
+                            throw new InvalidOperationException(Loc.T("Print_LayoutFailed"));
                         }
 
                         _printService.Print(request, document.Bitmap, document.DpiX, document.DpiY, layout);
-                        item.Status = "已发送（" + layout.PageCount + " 页）";
+                        item.Status = Loc.T("Print_SentShort") + layout.PageCount + Loc.T("Print_PagesSuffix");
                         succeeded++;
                     }
                     catch (Exception ex)
                     {
-                        item.Status = "失败：" + ex.Message;
+                        item.Status = Loc.T("Print_FailedSuffix") + ex.Message;
                         failed++;
                     }
 
@@ -510,16 +510,16 @@ namespace PSText.ViewModels
 
                     progress.Report(
                         (_batchCompleted / (double)Math.Max(1, items.Count)),
-                        string.Format("正在批量打印（{0}/{1}）：{2}", _batchCompleted, items.Count, item.FileName));
+                        string.Format(Loc.T("Print_Progress"), _batchCompleted, items.Count, item.FileName));
                 }
 
-                _batchStatus = string.Format("批量打印完成：成功 {0}，失败 {1}", succeeded, failed);
+                _batchStatus = string.Format(Loc.T("Print_BatchDone"), succeeded, failed);
                 StatusMessage = _batchStatus;
             }
             catch (Exception ex)
             {
-                HandleError("批量打印过程中出错。", ex, true);
-                _batchStatus = "批量打印中断";
+                HandleError(Loc.T("Print_BatchError"), ex, true);
+                _batchStatus = Loc.T("Print_BatchInterrupted");
             }
             finally
             {

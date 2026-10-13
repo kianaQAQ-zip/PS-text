@@ -140,6 +140,14 @@
       <SubType>Designer</SubType>
     </Page>
     <!-- 图标以 Resource 方式嵌入，供 MainWindow.xaml 用 pack URI 引用 -->
+    <Page Include="Resources\Strings.zh-CN.xaml">
+      <Generator>MSBuild:Compile</Generator>
+      <SubType>Designer</SubType>
+    </Page>
+    <Page Include="Resources\Strings.en-US.xaml">
+      <Generator>MSBuild:Compile</Generator>
+      <SubType>Designer</SubType>
+    </Page>
     <Resource Include="Resources\PS-text.ico" />
   </ItemGroup>
 
@@ -185,6 +193,11 @@
     <Compile Include="Services\AppSettings.cs" />
     <Compile Include="Services\CrashLogger.cs" />
     <Compile Include="Services\ProgressReporter.cs" />
+    <Compile Include="Services\Imaging\ImageMetadataHelper.cs" />
+    <Compile Include="Services\WindowPlacement.cs" />
+    <Compile Include="Services\ILocalizationService.cs" />
+    <Compile Include="Services\LocalizationService.cs" />
+    <Compile Include="Infrastructure\Localization\TranslateExtension.cs" />
     <Compile Include="Services\DotNetRuntimeInfo.cs" />
     <Compile Include="Services\FileAssociationService.cs" />
     <Compile Include="Services\CommandLineOptions.cs" />

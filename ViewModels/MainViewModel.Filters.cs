@@ -6,6 +6,7 @@ using PSText.Infrastructure;
 using PSText.Infrastructure.Imaging;
 using PSText.Models;
 using PSText.Services.Filters;
+using PSText.Services;
 
 namespace PSText.ViewModels
 {
@@ -39,6 +40,12 @@ namespace PSText.ViewModels
         private bool _textBold = true;
         private bool _textItalic;
         private bool _textShadow = true;
+
+        /// <summary>排布方式与平铺参数（单张文字的"满画面水印"）。</summary>
+        private TextLayout _textLayout = TextLayout.Single;
+        private double _textTileSpacingX = 25.0;
+        private double _textTileSpacingY = 18.0;
+        private double _textTileAngle = -30.0;
 
         /// <summary>最近一次一次性编辑的异步操作（供等待 / 自检）。</summary>
         private Task _pendingOperation;
@@ -174,6 +181,48 @@ namespace PSText.ViewModels
             set { SetProperty(ref _textMargin, ClampRange(value, 0.0, 400.0), "TextMargin"); }
         }
 
+        /// <summary>排布方式：0 = 单点，1 = 平铺满画面。</summary>
+        public int TextLayoutIndex
+        {
+            get { return _textLayout == TextLayout.Tile ? 1 : 0; }
+            set
+            {
+                TextLayout layout = value == 1 ? TextLayout.Tile : TextLayout.Single;
+
+                if (SetProperty(ref _textLayout, layout, "TextLayoutIndex"))
+                {
+                    OnPropertyChanged("IsTextTiled");
+                }
+            }
+        }
+
+        /// <summary>当前是否平铺模式（界面据此显示间距 / 角度）。</summary>
+        public bool IsTextTiled
+        {
+            get { return _textLayout == TextLayout.Tile; }
+        }
+
+        /// <summary>平铺的水平间距（占图像宽度的百分比）。</summary>
+        public double TextTileSpacingX
+        {
+            get { return _textTileSpacingX; }
+            set { SetProperty(ref _textTileSpacingX, ClampRange(value, 3.0, 200.0), "TextTileSpacingX"); }
+        }
+
+        /// <summary>平铺的垂直间距（占图像高度的百分比）。</summary>
+        public double TextTileSpacingY
+        {
+            get { return _textTileSpacingY; }
+            set { SetProperty(ref _textTileSpacingY, ClampRange(value, 3.0, 200.0), "TextTileSpacingY"); }
+        }
+
+        /// <summary>平铺的倾斜角度（度）。</summary>
+        public double TextTileAngle
+        {
+            get { return _textTileAngle; }
+            set { SetProperty(ref _textTileAngle, ClampRange(value, -80.0, 80.0), "TextTileAngle"); }
+        }
+
         /// <summary>是否加粗。</summary>
         public bool TextBold
         {
@@ -203,27 +252,27 @@ namespace PSText.ViewModels
         private void InitializeFilterCommands()
         {
             InvertCommand = CreateFilterCommand(
-                "反色",
+                Loc.T("Filter_Invert"),
                 () => buffer => _basicFilters.InvertAsync(buffer),
                 () => HasDocument);
 
             GrayscaleCommand = CreateFilterCommand(
-                "灰度",
+                Loc.T("Filter_Grayscale"),
                 () => buffer => _basicFilters.GrayscaleAsync(buffer),
                 () => HasDocument);
 
             ThresholdCommand = CreateFilterCommand(
-                "二值化",
+                Loc.T("Filter_Threshold"),
                 () => buffer => _basicFilters.ThresholdAsync(buffer, _threshold),
                 () => HasDocument);
 
             BlurCommand = CreateFilterCommand(
-                "高斯模糊",
+                Loc.T("Filter_GaussianBlur"),
                 () => buffer => _blurFilters.GaussianBlurAsync(buffer, _blurRadius),
                 () => HasDocument);
 
             SharpenCommand = CreateFilterCommand(
-                "USM 锐化",
+                Loc.T("Filter_UnsharpMask"),
                 () => buffer => _blurFilters.UnsharpMaskAsync(
                     buffer,
                     _sharpenRadius,
@@ -232,27 +281,27 @@ namespace PSText.ViewModels
                 () => HasDocument);
 
             RotateClockwiseCommand = CreateGeometryCommand(
-                "旋转 90°",
+                Loc.T("Filter_RotateCw90"),
                 buffer => _geometryFilters.RotateAsync(buffer, RotationAngle.Clockwise90));
 
             RotateCounterClockwiseCommand = CreateGeometryCommand(
-                "旋转 -90°",
+                Loc.T("Filter_RotateCcw90"),
                 buffer => _geometryFilters.RotateAsync(buffer, RotationAngle.Clockwise270));
 
             Rotate180Command = CreateGeometryCommand(
-                "旋转 180°",
+                Loc.T("Batch_Rotate180"),
                 buffer => _geometryFilters.RotateAsync(buffer, RotationAngle.Clockwise180));
 
             FlipHorizontalCommand = CreateGeometryCommand(
-                "水平翻转",
+                Loc.T("Geometry_FlipHorizontal"),
                 buffer => _geometryFilters.FlipHorizontalAsync(buffer));
 
             FlipVerticalCommand = CreateGeometryCommand(
-                "垂直翻转",
+                Loc.T("Geometry_FlipVertical"),
                 buffer => _geometryFilters.FlipVerticalAsync(buffer));
 
             ApplyBorderCommand = CreateFilterCommand(
-                "添加边框",
+                Loc.T("Border_Apply"),
                 () => buffer => _borderFilters.ApplyAsync(
                     buffer,
                     _borderStyle,
@@ -304,19 +353,23 @@ namespace PSText.ViewModels
                     Margin = _textMargin,
                     Bold = _textBold,
                     Italic = _textItalic,
-                    Shadow = _textShadow
+                    Shadow = _textShadow,
+                    Layout = _textLayout,
+                    TileSpacingXPercent = _textTileSpacingX,
+                    TileSpacingYPercent = _textTileSpacingY,
+                    TileAngleDegrees = _textTileAngle
                 };
 
                 double dpiX = _document != null ? _document.DpiX : 96.0;
                 double dpiY = _document != null ? _document.DpiY : 96.0;
 
                 await ApplyOneShotAsync(
-                    "添加文字",
+                    Loc.T("Text_Apply"),
                     buffer => _textOverlayFilter.ApplyAsync(buffer, options, dpiX, dpiY)).ConfigureAwait(true);
             }
             catch (Exception ex)
             {
-                HandleError("添加文字失败。", ex, true);
+                HandleError(Loc.T("Filter_AddTextFailed"), ex, true);
             }
         }
 

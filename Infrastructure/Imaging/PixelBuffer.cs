@@ -1,6 +1,7 @@
 using System;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
+using PSText.Services;
 
 namespace PSText.Infrastructure.Imaging
 {
@@ -60,7 +61,7 @@ namespace PSText.Infrastructure.Imaging
 
             if (width <= 0 || height <= 0)
             {
-                throw new ArgumentOutOfRangeException("width", "像素尺寸必须为正数。");
+                throw new ArgumentOutOfRangeException("width", Loc.T("Pixel_ReasonPositive"));
             }
 
             int stride = width * BytesPerPixel;
@@ -69,7 +70,7 @@ namespace PSText.Infrastructure.Imaging
             if (pixels.LongLength < required)
             {
                 throw new ArgumentException(
-                    string.Format("像素数组长度不足：需要 {0} 字节，实际 {1} 字节。", required, pixels.LongLength),
+                    string.Format(Loc.T("Pixel_ReasonArrayShort"), required, pixels.LongLength),
                     "pixels");
             }
 

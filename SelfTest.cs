@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Collections.ObjectModel;
 using System.IO;
 using System.Text;
 using System.Threading.Tasks;
@@ -15,6 +16,7 @@ using PSText.Models;
 using PSText.Services;
 using PSText.Services.Batch;
 using PSText.Services.Filters;
+using PSText.Services.Imaging;
 using PSText.Services.Interfaces;
 using PSText.Services.Printing;
 using PSText.ViewModels;
@@ -99,6 +101,10 @@ namespace PSText
                 CheckGeometry(ref checks, ref failures, log);
                 CheckBorderFilter(ref checks, ref failures, log);
                 CheckTextOverlay(ref checks, ref failures, log);
+                CheckWatermarkTiling(ref checks, ref failures, log);
+                CheckMetadataPreservation(imageService, tempRoot, ref checks, ref failures, log);
+                CheckWindowPlacement(ref checks, ref failures, log);
+                CheckLocalization(ref checks, ref failures, log);
                 CheckCropBehaviour(imageService, pngPath, ref checks, ref failures, log);
                 CheckPrintUnitsAndLayout(ref checks, ref failures, log);
                 CheckPrintPagination(ref checks, ref failures, log);
@@ -9058,6 +9064,1262 @@ namespace PSText
             {
                 log.AppendLine("  OK   带标签栏的主窗口能构造并完成布局（标签模板可实例化）");
             }
+        }
+
+        /// <summary>
+        /// 校验水印平铺。
+        ///
+        /// 平铺的价值在"整幅图都盖住"，所以断言不能只看"画上去了没有"，
+        /// 而要打在两处：**九宫格每一格都有水印**（不是只有中间有），
+        /// 以及**间距变小则水印变多**（比例关系，证明确实按网格在铺）。
+        /// </summary>
+        private static void CheckWatermarkTiling(ref int checks, ref int failures, StringBuilder log)
+        {
+            log.AppendLine("[37] 水印平铺（批量 / 单张共用同一套绘制）");
+
+            // 底图是 RGB(20,20,20)、文字是白色，所以"亮"的判据取 128。
+            const int BrightThreshold = 128;
+
+            try
+            {
+                TextOverlayFilter filter = new TextOverlayFilter();
+                PixelBuffer source = CreateSolidBuffer(600, 400, 20, 20, 20);
+
+                TextOverlayOptions single = new TextOverlayOptions
+                {
+                    Text = "内部资料",
+                    FontSize = 22.0,
+                    Color = Colors.White,
+                    Anchor = TextAnchor.BottomRight,
+                    Margin = 20.0,
+                    Bold = true,
+                    Shadow = false,
+                    Layout = TextLayout.Single
+                };
+
+                TextOverlayOptions tiled = new TextOverlayOptions
+                {
+                    Text = single.Text,
+                    FontSize = single.FontSize,
+                    Color = Colors.White,
+                    Bold = true,
+                    Shadow = false,
+                    Layout = TextLayout.Tile,
+                    TileSpacingXPercent = 25.0,
+                    TileSpacingYPercent = 20.0,
+                    TileAngleDegrees = 0.0
+                };
+
+                PixelBuffer singleResult = filter.Apply(source, single, 96.0, 96.0);
+                PixelBuffer tiledResult = filter.Apply(source, tiled, 96.0, 96.0);
+
+                // ---- 平铺要盖满整幅图（九宫格每一格都有水印）----
+                checks++;
+                // 阈值必须高于底图颜色（底是 RGB 20,20,20）—— 取 3 的话背景自己就算"亮"，断言会空过。
+                int coveredCells = CountCoveredCells(tiledResult, 3, 3, BrightThreshold);
+
+                if (coveredCells < 9)
+                {
+                    failures++;
+                    log.AppendLine(string.Format(
+                        "  FAIL 平铺后应有 9 个格子都有水印，实际只有 {0} 个", coveredCells));
+                }
+                else
+                {
+                    log.AppendLine("  OK   平铺后九宫格每一格都有水印（真正铺满整幅图）");
+                }
+
+                checks++;
+                int singleCoveredCells = CountCoveredCells(singleResult, 3, 3, BrightThreshold);
+
+                if (singleCoveredCells >= 9)
+                {
+                    failures++;
+                    log.AppendLine("  FAIL 单点模式不该盖满所有格子（那样就分不出两种模式了）");
+                }
+                else
+                {
+                    log.AppendLine(string.Format(
+                        "  OK   单点模式只覆盖 {0} 个格子（与平铺模式有明确区别）", singleCoveredCells));
+                }
+
+                // ---- 间距减半 → 水印数量明显增加 ----
+                TextOverlayOptions dense = new TextOverlayOptions
+                {
+                    Text = single.Text,
+                    FontSize = single.FontSize,
+                    Color = Colors.White,
+                    Bold = true,
+                    Shadow = false,
+                    Layout = TextLayout.Tile,
+                    TileSpacingXPercent = 12.0,
+                    TileSpacingYPercent = 10.0,
+                    TileAngleDegrees = 0.0
+                };
+
+                int tiledCount = CountBrightPixels(tiledResult, BrightThreshold);
+                int denseCount = CountBrightPixels(filter.Apply(source, dense, 96.0, 96.0), BrightThreshold);
+
+                checks++;
+                if (denseCount < tiledCount * 2)
+                {
+                    failures++;
+                    log.AppendLine(string.Format(
+                        "  FAIL 间距减半后水印数量应大幅增加（疏 {0} → 密 {1}）", tiledCount, denseCount));
+                }
+                else
+                {
+                    log.AppendLine(string.Format(
+                        "  OK   间距决定疏密（25%×20% 共 {0} 个亮像素 → 12%×10% 共 {1} 个）",
+                        tiledCount, denseCount));
+                }
+
+                // ---- 倾斜会改变结果 ----
+                TextOverlayOptions tilted = new TextOverlayOptions
+                {
+                    Text = single.Text,
+                    FontSize = single.FontSize,
+                    Color = Colors.White,
+                    Bold = true,
+                    Shadow = false,
+                    Layout = TextLayout.Tile,
+                    TileSpacingXPercent = 25.0,
+                    TileSpacingYPercent = 20.0,
+                    TileAngleDegrees = -35.0
+                };
+
+                PixelBuffer tiltedResult = filter.Apply(source, tilted, 96.0, 96.0);
+                int tiltedCovered = CountCoveredCells(tiltedResult, 3, 3, BrightThreshold);
+
+                checks++;
+                if (CountDifferentPixels(tiledResult.GetPixels(), tiltedResult.GetPixels()) == 0)
+                {
+                    failures++;
+                    log.AppendLine("  FAIL 倾斜角没有生效（0° 与 -35° 的结果完全一致）");
+                }
+                else if (tiltedCovered < 9)
+                {
+                    failures++;
+                    log.AppendLine(string.Format(
+                        "  FAIL 倾斜后网格要按对角线铺才不留空角，实际只有 {0} 个格子有水印", tiltedCovered));
+                }
+                else
+                {
+                    log.AppendLine("  OK   倾斜生效且不留空角（转 -35° 后九宫格仍然铺满）");
+                }
+
+                // ---- 极端间距不能把界面卡死 ----
+                TextOverlayOptions extreme = new TextOverlayOptions
+                {
+                    Text = single.Text,
+                    FontSize = 6.0,
+                    Color = Colors.White,
+                    Bold = true,
+                    Shadow = false,
+                    Layout = TextLayout.Tile,
+                    TileSpacingXPercent = 3.0,
+                    TileSpacingYPercent = 3.0,
+                    TileAngleDegrees = -45.0
+                };
+
+                checks++;
+                System.Diagnostics.Stopwatch watch = System.Diagnostics.Stopwatch.StartNew();
+                PixelBuffer extremeResult = filter.Apply(CreateSolidBuffer(2000, 1500, 20, 20, 20), extreme, 96.0, 96.0);
+                watch.Stop();
+
+                if (extremeResult == null)
+                {
+                    failures++;
+                    log.AppendLine("  FAIL 极端间距下渲染失败");
+                }
+                else if (watch.ElapsedMilliseconds > 5000)
+                {
+                    failures++;
+                    log.AppendLine(string.Format(
+                        "  FAIL 极端间距（3%）下耗时 {0} ms —— 瓦片数上限没有生效", watch.ElapsedMilliseconds));
+                }
+                else
+                {
+                    log.AppendLine(string.Format(
+                        "  OK   极端间距（3% × 3%，2000×1500）在 {0} ms 内完成（瓦片数上限生效）",
+                        watch.ElapsedMilliseconds));
+                }
+
+                // ---- 批量步骤要把平铺参数透传下去 ----
+                checks++;
+                BatchWatermarkStep step = new BatchWatermarkStep
+                {
+                    Text = "仅供核对",
+                    SizeMode = WatermarkSizeMode.RelativeToWidth,
+                    FontSize = 6.0,
+                    Layout = TextLayout.Tile,
+                    TileSpacingX = 20.0,
+                    TileSpacingY = 20.0,
+                    TileAngle = 0.0,
+                    Opacity = 255,
+                    Shadow = false
+                };
+
+                PixelBuffer viaStep = BatchPipeliner.Run(
+                    CreateSolidBuffer(400, 300, 20, 20, 20),
+                    new List<IBatchStep> { step },
+                    BatchContext.FullResolution,
+                    System.Threading.CancellationToken.None);
+
+                int stepCovered = CountCoveredCells(viaStep, 3, 3, BrightThreshold);
+
+                if (stepCovered < 9)
+                {
+                    failures++;
+                    log.AppendLine(string.Format(
+                        "  FAIL 批量水印步骤没有把平铺参数透传下去（只覆盖 {0} 个格子）", stepCovered));
+                }
+                else if (step.Summary.IndexOf("平铺", StringComparison.Ordinal) < 0)
+                {
+                    failures++;
+                    log.AppendLine("  FAIL 批量步骤的摘要里应写出平铺参数，实际：" + step.Summary);
+                }
+                else
+                {
+                    log.AppendLine("  OK   批量水印步骤正确透传平铺参数（摘要：" + step.Summary + "）");
+                }
+            }
+            catch (Exception ex)
+            {
+                failures++;
+                log.AppendLine("  FAIL 水印平铺测试异常: " + ex.GetType().Name + " " + ex.Message);
+            }
+
+            log.AppendLine();
+        }
+
+        /// <summary>把图分成 rows×columns 格，返回"含有亮像素"的格子数。</summary>
+        private static int CountCoveredCells(PixelBuffer buffer, int columns, int rows, int threshold)
+        {
+            if (buffer == null || columns <= 0 || rows <= 0)
+            {
+                return 0;
+            }
+
+            byte[] pixels = buffer.GetPixels();
+            int covered = 0;
+
+            for (int row = 0; row < rows; row++)
+            {
+                for (int column = 0; column < columns; column++)
+                {
+                    int left = column * buffer.Width / columns;
+                    int right = (column + 1) * buffer.Width / columns;
+                    int top = row * buffer.Height / rows;
+                    int bottom = (row + 1) * buffer.Height / rows;
+                    bool found = false;
+
+                    for (int y = top; y < bottom && !found; y++)
+                    {
+                        for (int x = left; x < right; x++)
+                        {
+                            int index = (y * buffer.Width + x) * 4;
+
+                            if (pixels[index] >= threshold || pixels[index + 1] >= threshold || pixels[index + 2] >= threshold)
+                            {
+                                found = true;
+                                break;
+                            }
+                        }
+                    }
+
+                    if (found)
+                    {
+                        covered++;
+                    }
+                }
+            }
+
+            return covered;
+        }
+
+        /// <summary>统计亮像素个数（任一通道 >= 阈值）。</summary>
+        private static int CountBrightPixels(PixelBuffer buffer, int threshold)
+        {
+            if (buffer == null)
+            {
+                return 0;
+            }
+
+            byte[] pixels = buffer.GetPixels();
+            int count = 0;
+
+            for (int i = 0; i < pixels.Length; i += 4)
+            {
+                if (pixels[i] >= threshold || pixels[i + 1] >= threshold || pixels[i + 2] >= threshold)
+                {
+                    count++;
+                }
+            }
+
+            return count;
+        }
+
+        /// <summary>
+        /// 校验 EXIF / ICC 元数据的保留。
+        ///
+        /// 这块的正确性只能靠**往返**验证：造一张带元数据的图 → 加载 → 保存 → 再加载 → 逐项核对。
+        ///
+        /// 另外这里刻意**不再相信"加载时抓一份元数据存起来"**：BitmapMetadata 有线程亲和性，
+        /// 跨线程访问会抛异常，被 catch 之后表现成"元数据莫名其妙没了"。
+        /// 现在的模型是"保存时在同一个线程上从源文件重读"，所以核对也走同一条路。
+        /// </summary>
+        private static void CheckMetadataPreservation(
+            IImageService imageService,
+            string tempRoot,
+            ref int checks,
+            ref int failures,
+            StringBuilder log)
+        {
+            log.AppendLine("[38] EXIF / ICC 元数据保留");
+
+            try
+            {
+                string sourcePath = Path.Combine(tempRoot, "meta-source.jpg");
+                string jpegPath = Path.Combine(tempRoot, "meta-roundtrip.jpg");
+                string pngPath = Path.Combine(tempRoot, "meta-crossformat.png");
+
+                // ---- 1) 造一张带 EXIF + 缩略图 + ICC 的 JPEG ----
+                BitmapSource bitmap = PixelBuffer.ToBitmap(CreateHorizontalRamp(160, 120), 96.0, 96.0);
+                BitmapSource thumbnail = PixelBuffer.ToBitmap(CreateSolidBuffer(32, 24, 200, 100, 50), 96.0, 96.0);
+
+                BitmapMetadata metadata = new BitmapMetadata("jpg");
+                metadata.SetQuery(ImageMetadataHelper.MakeQuery, "TestMake");
+                metadata.SetQuery(ImageMetadataHelper.ModelQuery, "TestModel");
+                metadata.SetQuery(ImageMetadataHelper.OrientationQuery, (ushort)6);
+                metadata.SetQuery(ImageMetadataHelper.DateTimeOriginalQuery, "2026:10:09 10:00:00");
+
+                System.Collections.Generic.List<ColorContext> contexts =
+                    new System.Collections.Generic.List<ColorContext> { new ColorContext(PixelFormats.Bgr24) };
+
+                JpegBitmapEncoder encoder = new JpegBitmapEncoder();
+                encoder.Frames.Add(BitmapFrame.Create(
+                    bitmap, thumbnail, metadata, new ReadOnlyCollection<ColorContext>(contexts)));
+
+                using (System.IO.FileStream stream = new System.IO.FileStream(
+                    sourcePath, System.IO.FileMode.Create, System.IO.FileAccess.Write, System.IO.FileShare.None))
+                {
+                    encoder.Save(stream);
+                }
+
+                // ---- 2) 加载：方向要被校正；"有没有元数据"要知道 ----
+                ImageLoadResult loaded = imageService.LoadAsync(sourcePath).GetAwaiter().GetResult();
+
+                checks++;
+                if (!loaded.HasSourceMetadata)
+                {
+                    failures++;
+                    log.AppendLine("  FAIL 这张图带 EXIF，加载后 HasSourceMetadata 应为 true");
+                }
+                else
+                {
+                    log.AppendLine("  OK   加载时认出源文件带元数据（只记布尔，不跨线程带对象）");
+                }
+
+                // 方向 6 表示"顺时针旋转 90° 后才是正的"，因此像素宽高应当互换。
+                // 这一条是给一个**真实存在过的缺陷**上的保险：原来方向标记是在
+                // FileStream 的 using 块**外面**读的，而 OnLoad 只把像素读进内存、
+                // 元数据查询仍要回到流上 —— 流一关就静默返回 null，于是 orientation
+                // 永远是 1，竖拍照片一直显示成横的，且不报错。见 WpfImageService.Decode 的注释。
+                checks++;
+                if (loaded.PixelWidth != 120 || loaded.PixelHeight != 160)
+                {
+                    failures++;
+                    log.AppendLine(string.Format(
+                        "  FAIL 方向 6 的图（160×120）应当被转成 120×160，实际 {0}×{1} —— 方向标记没读到",
+                        loaded.PixelWidth, loaded.PixelHeight));
+                }
+                else if (!loaded.OrientationNormalized)
+                {
+                    failures++;
+                    log.AppendLine("  FAIL 尺寸被转了却没标记为「已按 EXIF 方向校正」");
+                }
+                else
+                {
+                    log.AppendLine("  OK   EXIF 方向 6 生效：像素被转正（160×120 → 120×160）");
+                }
+
+                // ---- 3) 保存侧读元数据：方向清零、缩略图丢弃 ----
+                ReadOnlyCollection<ColorContext> savedContexts;
+                BitmapMetadata forSave = ImageMetadataHelper.LoadForSave(
+                    sourcePath, ImageFileFormat.Jpeg, loaded.PixelWidth, loaded.PixelHeight, out savedContexts);
+
+                checks++;
+                if (forSave == null)
+                {
+                    failures++;
+                    log.AppendLine("  FAIL 同格式（JPEG→JPEG）应当能取到元数据，实际为 null");
+                }
+                else if (!string.Equals(
+                             ImageMetadataHelper.TryGetString(forSave, ImageMetadataHelper.MakeQuery),
+                             "TestMake", StringComparison.Ordinal))
+                {
+                    failures++;
+                    log.AppendLine("  FAIL 取到的元数据里读不到相机厂商："
+                                   + (ImageMetadataHelper.TryGetString(forSave, ImageMetadataHelper.MakeQuery) ?? "null"));
+                }
+                else
+                {
+                    log.AppendLine("  OK   保存侧能读到源文件的元数据（厂商 / 型号 / 拍摄时间）");
+                }
+
+                checks++;
+                ushort forSaveOrientation = ImageMetadataHelper.TryGetUShort(
+                    forSave, ImageMetadataHelper.OrientationQuery);
+
+                if (forSaveOrientation != 1)
+                {
+                    failures++;
+                    log.AppendLine(string.Format(
+                        "  FAIL 写回前方向标记应清零（否则保存后看图软件会再转一次），实际 {0}", forSaveOrientation));
+                }
+                else
+                {
+                    log.AppendLine("  OK   方向标记在写回前已清零（不会被二次旋转）");
+                }
+
+                checks++;
+                int thumbnailLeft = 0;
+                string[] thumbnailQueries =
+                {
+                    "/app1/ifd/exif/subifd:{uint=513}",
+                    "/app1/ifd/exif/subifd:{uint=514}",
+                    "/app1/ifd/exif/{uint=513}",
+                    "/app1/ifd/exif/{uint=514}"
+                };
+
+                for (int i = 0; i < thumbnailQueries.Length; i++)
+                {
+                    try
+                    {
+                        if (forSave != null && forSave.ContainsQuery(thumbnailQueries[i]))
+                        {
+                            thumbnailLeft++;
+                        }
+                    }
+                    catch (Exception)
+                    {
+                    }
+                }
+
+                if (thumbnailLeft > 0)
+                {
+                    failures++;
+                    log.AppendLine(string.Format(
+                        "  FAIL 写回前应丢弃 EXIF 缩略图（那是编辑前的旧画面），实际还剩 {0} 处", thumbnailLeft));
+                }
+                else
+                {
+                    log.AppendLine("  OK   EXIF 缩略图已丢弃（不会出现缩略图与主图不一致）");
+                }
+
+                checks++;
+                if (savedContexts == null || savedContexts.Count == 0)
+                {
+                    failures++;
+                    log.AppendLine("  FAIL 源文件带 ICC 配置，保存侧应当一并取到");
+                }
+                else
+                {
+                    log.AppendLine(string.Format("  OK   同时取到 {0} 个 ICC 色彩配置", savedContexts.Count));
+                }
+
+                // ---- 4) 端到端另存为 JPEG：元数据要活下来 ----
+                ImageSaveOptions jpegOptions = new ImageSaveOptions
+                {
+                    Format = ImageFileFormat.Jpeg,
+                    QualityLevel = 92,
+                    PreserveDpi = true,
+                    PreserveMetadata = true,
+                    MetadataSourcePath = sourcePath
+                };
+
+                imageService.SaveAsync(loaded.Bitmap, jpegPath, jpegOptions).GetAwaiter().GetResult();
+
+                checks++;
+                if (!string.IsNullOrEmpty(jpegOptions.MetadataNote))
+                {
+                    failures++;
+                    log.AppendLine("  FAIL 同格式保存不该出现「元数据被丢弃」的说明，实际：" + jpegOptions.MetadataNote);
+                }
+                else
+                {
+                    log.AppendLine("  OK   同格式保存没有丢弃元数据（也没有多余提示）");
+                }
+
+                ImageLoadResult jpegReloaded = imageService.LoadAsync(jpegPath).GetAwaiter().GetResult();
+
+                ReadOnlyCollection<ColorContext> jpegContexts;
+                BitmapMetadata jpegMetadata = ImageMetadataHelper.LoadForSave(
+                    jpegPath, ImageFileFormat.Jpeg, jpegReloaded.PixelWidth, jpegReloaded.PixelHeight, out jpegContexts);
+
+                checks++;
+                bool kept =
+                    jpegReloaded.HasSourceMetadata
+                    && jpegMetadata != null
+                    && string.Equals(
+                        ImageMetadataHelper.TryGetString(jpegMetadata, ImageMetadataHelper.MakeQuery),
+                        "TestMake", StringComparison.Ordinal)
+                    && string.Equals(
+                        ImageMetadataHelper.TryGetString(jpegMetadata, ImageMetadataHelper.ModelQuery),
+                        "TestModel", StringComparison.Ordinal)
+                    && string.Equals(
+                        ImageMetadataHelper.TryGetString(jpegMetadata, ImageMetadataHelper.DateTimeOriginalQuery),
+                        "2026:10:09 10:00:00", StringComparison.Ordinal);
+
+                if (!kept)
+                {
+                    failures++;
+                    log.AppendLine(string.Format(
+                        "  FAIL 另存为 JPEG 后元数据丢失（厂商=「{0}」型号=「{1}」拍摄时间=「{2}」）",
+                        ImageMetadataHelper.TryGetString(jpegMetadata, ImageMetadataHelper.MakeQuery) ?? "null",
+                        ImageMetadataHelper.TryGetString(jpegMetadata, ImageMetadataHelper.ModelQuery) ?? "null",
+                        ImageMetadataHelper.TryGetString(jpegMetadata, ImageMetadataHelper.DateTimeOriginalQuery) ?? "null"));
+                }
+                else
+                {
+                    log.AppendLine("  OK   另存为 JPEG 后厂商 / 型号 / 拍摄时间全部保留");
+                }
+
+                checks++;
+                ushort orientationAfterSave = ImageMetadataHelper.TryGetUShort(
+                    jpegMetadata, ImageMetadataHelper.OrientationQuery);
+
+                if (orientationAfterSave != 1 || jpegReloaded.OrientationNormalized)
+                {
+                    failures++;
+                    log.AppendLine(string.Format(
+                        "  FAIL 保存后的文件不应再带旋转方向（实际 {0}），否则再打开会被转一次", orientationAfterSave));
+                }
+                else
+                {
+                    log.AppendLine("  OK   保存后的文件方向为 1（再打开不会二次旋转）");
+                }
+
+                // ---- 5) 跨格式另存为 PNG：元数据不兼容，必须丢弃并说明 ----
+                ImageSaveOptions pngOptions = new ImageSaveOptions
+                {
+                    Format = ImageFileFormat.Png,
+                    PreserveDpi = true,
+                    PreserveMetadata = true,
+                    MetadataSourcePath = sourcePath
+                };
+
+                imageService.SaveAsync(loaded.Bitmap, pngPath, pngOptions).GetAwaiter().GetResult();
+
+                checks++;
+                if (!File.Exists(pngPath))
+                {
+                    failures++;
+                    log.AppendLine("  FAIL 跨格式另存为应当成功（元数据不兼容不能导致保存失败）");
+                }
+                else if (string.IsNullOrEmpty(pngOptions.MetadataNote))
+                {
+                    failures++;
+                    log.AppendLine("  FAIL 跨格式丢弃元数据时必须留下说明，不能静默丢掉");
+                }
+                else
+                {
+                    log.AppendLine("  OK   跨格式另存为成功，且明确说明了元数据未保留：" + pngOptions.MetadataNote);
+                }
+
+                // ---- 6) 纯函数：格式过滤与路径健壮性 ----
+                checks++;
+                ReadOnlyCollection<ColorContext> ignored;
+
+                bool filterOk =
+                    ImageMetadataHelper.LoadForSave(sourcePath, ImageFileFormat.Png, 10, 10, out ignored) == null
+                    && ImageMetadataHelper.LoadForSave(sourcePath, ImageFileFormat.Jpeg, 10, 10, out ignored) != null
+                    && ImageMetadataHelper.LoadForSave(Path.Combine(tempRoot, "not-exists.jpg"), ImageFileFormat.Jpeg, 10, 10, out ignored) == null
+                    && ImageMetadataHelper.LoadForSave(null, ImageFileFormat.Jpeg, 10, 10, out ignored) == null;
+
+                if (!filterOk)
+                {
+                    failures++;
+                    log.AppendLine("  FAIL 元数据的格式 / 路径过滤不对（PNG 目标应 null、JPEG 应通过、不存在与 null 路径应 null）");
+                }
+                else
+                {
+                    log.AppendLine("  OK   格式与路径过滤正确：JPEG 通过，PNG / 不存在 / 空路径一律返回 null");
+                }
+
+                checks++;
+                string reason = ImageMetadataHelper.DescribeSkipReason(sourcePath, ImageFileFormat.Png);
+
+                if (string.IsNullOrEmpty(reason) || reason.IndexOf("PNG", StringComparison.OrdinalIgnoreCase) < 0)
+                {
+                    failures++;
+                    log.AppendLine("  FAIL 丢弃元数据时的说明应当点出目标格式，实际：" + reason);
+                }
+                else
+                {
+                    log.AppendLine("  OK   丢弃原因可读：" + reason);
+                }
+            }
+            catch (Exception ex)
+            {
+                failures++;
+                log.AppendLine("  FAIL 元数据往返测试异常: " + ex.GetType().Name + " " + ex.Message);
+            }
+
+            log.AppendLine();
+        }
+
+        /// <summary>
+        /// 校验窗口位置记忆的**校验逻辑**。
+        ///
+        /// 这里要钉住的只有一件事：**保存下来的窗口坐标完全落在已经不存在的显示器上时，
+        /// 必须拒绝恢复**。否则用户看到的现象是"程序启动了但没界面" —— 比不恢复位置糟得多，
+        /// 而且这种问题只在换显示器的人身上偶发，极难复现。
+        /// </summary>
+        private static void CheckWindowPlacement(ref int checks, ref int failures, StringBuilder log)
+        {
+            log.AppendLine("[39] 窗口 / 面板状态记忆");
+
+            try
+            {
+                List<Rect> primary = new List<Rect> { new Rect(0, 0, 1920, 1040) };
+                Rect fitted;
+
+                // ---- 完全在主屏内：原样保留 ----
+                checks++;
+                Rect inside = new Rect(120, 80, 1180, 760);
+
+                if (!WindowPlacement.TryFit(inside, primary, out fitted) || !fitted.Equals(inside))
+                {
+                    failures++;
+                    log.AppendLine(string.Format(
+                        "  FAIL 完全在屏幕内的矩形应原样保留，实际 {0}", fitted));
+                }
+                else
+                {
+                    log.AppendLine("  OK   完全在屏幕内的位置原样保留");
+                }
+
+                // ---- 挂在右边缘外：夹回屏幕内 ----
+                checks++;
+                Rect offRight = new Rect(1800, 200, 1180, 760);
+
+                if (!WindowPlacement.TryFit(offRight, primary, out fitted))
+                {
+                    failures++;
+                    log.AppendLine("  FAIL 部分可见的窗口应当被接受（夹回屏幕内）");
+                }
+                else if (fitted.Right > 1920.5 || fitted.Left < -0.5)
+                {
+                    failures++;
+                    log.AppendLine(string.Format("  FAIL 夹回后应当完全落在屏幕内，实际 {0}", fitted));
+                }
+                else
+                {
+                    log.AppendLine(string.Format("  OK   挂在屏幕外的窗口被夹回可见区域（{0:0} → {1:0}）",
+                        offRight.Left, fitted.Left));
+                }
+
+                // ---- 完全落在"已拔掉的显示器"上：必须拒绝 ----
+                checks++;
+                Rect ghostMonitor = new Rect(2400, 300, 1180, 760);   // 第二个显示器（不在了）
+
+                if (WindowPlacement.TryFit(ghostMonitor, primary, out fitted))
+                {
+                    failures++;
+                    log.AppendLine(string.Format(
+                        "  FAIL 完全落在已不存在的显示器上时必须拒绝恢复（否则用户会以为程序没启动），实际给了 {0}",
+                        fitted));
+                }
+                else
+                {
+                    log.AppendLine("  OK   落在已拔掉的显示器上会被拒绝（回到系统默认居中，而不是跑到屏幕外）");
+                }
+
+                // ---- 跨屏：选重叠面积最大的那块 ----
+                checks++;
+                List<Rect> dual = new List<Rect>
+                {
+                    new Rect(0, 0, 1920, 1040),
+                    new Rect(1920, 0, 1920, 1040)
+                };
+
+                Rect spanning = new Rect(1700, 300, 1180, 760);   // 大部分在第二块屏上
+
+                if (!WindowPlacement.TryFit(spanning, dual, out fitted))
+                {
+                    failures++;
+                    log.AppendLine("  FAIL 跨屏窗口应当能恢复");
+                }
+                else if (fitted.Left < 1919.0)
+                {
+                    failures++;
+                    log.AppendLine(string.Format(
+                        "  FAIL 跨屏时应夹到重叠面积最大的那块屏（第二块，Left ≥ 1920），实际 Left={0:0}", fitted.Left));
+                }
+                else
+                {
+                    log.AppendLine(string.Format("  OK   跨屏时选重叠面积最大的显示器（夹到 Left={0:0}）", fitted.Left));
+                }
+
+                // ---- 比屏幕还大：缩到屏幕尺寸 ----
+                checks++;
+                Rect oversized = new Rect(0, 0, 3000, 2000);
+
+                if (!WindowPlacement.TryFit(oversized, primary, out fitted)
+                    || fitted.Width > 1920.5 || fitted.Height > 1040.5)
+                {
+                    failures++;
+                    log.AppendLine(string.Format("  FAIL 比屏幕还大的窗口应被缩到屏幕尺寸，实际 {0}", fitted));
+                }
+                else
+                {
+                    log.AppendLine(string.Format("  OK   比屏幕还大的窗口被缩到屏幕尺寸（{0:0}×{1:0}）",
+                        fitted.Width, fitted.Height));
+                }
+
+                // ---- 标题栏必须可见（能被拖回来）----
+                checks++;
+                Rect hangingTop = new Rect(200, -600, 1180, 760);
+
+                if (!WindowPlacement.TryFit(hangingTop, primary, out fitted) || fitted.Top < -0.5)
+                {
+                    failures++;
+                    log.AppendLine(string.Format(
+                        "  FAIL 标题栏必须留在屏幕内（否则窗口拖不动），实际 Top={0:0}", fitted.Top));
+                }
+                else
+                {
+                    log.AppendLine(string.Format("  OK   标题栏始终可见（Top 被夹到 {0:0}）", fitted.Top));
+                }
+
+                // ---- 非法输入 ----
+                checks++;
+                bool invalidRejected =
+                    !WindowPlacement.TryFit(new Rect(0, 0, 50, 40), primary, out fitted)
+                    && !WindowPlacement.TryFit(new Rect(0, 0, double.NaN, 700), primary, out fitted)
+                    && !WindowPlacement.TryFit(new Rect(0, 0, 1180, 760), new List<Rect>(), out fitted)
+                    && !WindowPlacement.TryFit(new Rect(0, 0, 1180, 760), null, out fitted);
+
+                if (!invalidRejected)
+                {
+                    failures++;
+                    log.AppendLine("  FAIL 过小尺寸 / NaN / 空显示器列表都应被拒绝");
+                }
+                else
+                {
+                    log.AppendLine("  OK   过小尺寸 / NaN / 无显示器信息都安全拒绝");
+                }
+
+                // ---- ViewModel 侧：存与取要一致，面板宽度要有上下限 ----
+                MainViewModel viewModel = new MainViewModel(
+                    new WpfImageService(),
+                    new NullDialogService(),
+                    new ImmediateDispatcherService());
+
+                MemorySettingsService settings = new MemorySettingsService();
+                viewModel.SettingsService = settings;
+
+                checks++;
+                if (viewModel.SavedWindowBounds != null)
+                {
+                    failures++;
+                    log.AppendLine("  FAIL 全新设置不该带窗口位置");
+                }
+                else
+                {
+                    log.AppendLine("  OK   全新设置下不动窗口位置（交给系统居中）");
+                }
+
+                checks++;
+                viewModel.SaveWindowState(new Rect(300, 200, 1280, 820), false, 360);
+
+                Rect? saved = viewModel.SavedWindowBounds;
+
+                if (saved == null
+                    || Math.Abs(saved.Value.Left - 300) > 0.01
+                    || Math.Abs(saved.Value.Width - 1280) > 0.01
+                    || Math.Abs(viewModel.SavedPanelWidth - 360) > 0.01)
+                {
+                    failures++;
+                    log.AppendLine(string.Format(
+                        "  FAIL 窗口状态存取不一致（bounds={0}，面板宽={1:0.#}）",
+                        saved == null ? "null" : saved.Value.ToString(), viewModel.SavedPanelWidth));
+                }
+                else
+                {
+                    log.AppendLine("  OK   窗口位置与面板宽度能存能取（1280×820 @(300,200)，面板 360）");
+                }
+
+                checks++;
+                viewModel.SaveWindowState(new Rect(300, 200, 1280, 820), true, 5000);
+
+                if (Math.Abs(viewModel.SavedPanelWidth - 640.0) > 0.01)
+                {
+                    failures++;
+                    log.AppendLine(string.Format(
+                        "  FAIL 面板宽度要有上限（否则会把画布挤没），实际收到 {0:0.#}", viewModel.SavedPanelWidth));
+                }
+                else if (!viewModel.SavedWindowMaximized)
+                {
+                    failures++;
+                    log.AppendLine("  FAIL 最大化状态没有记下来");
+                }
+                else
+                {
+                    log.AppendLine("  OK   面板宽度被收敛到上限 640（不会把画布挤没），最大化状态也记住了");
+                }
+
+                // ---- 缩放模式偏好 ----
+                checks++;
+                // ZoomMode 的 setter 是私有的（界面通过命令切换），这里走公开命令。
+                viewModel.ActualSize();
+                viewModel.SaveWindowState(new Rect(1, 1, 1280, 820), false, 360);
+                MainViewModel reloaded = new MainViewModel(
+                    new WpfImageService(), new NullDialogService(), new ImmediateDispatcherService());
+                reloaded.SettingsService = settings;
+
+                if (reloaded.PreferredZoomMode != ZoomMode.ActualSize)
+                {
+                    failures++;
+                    log.AppendLine(string.Format(
+                        "  FAIL 缩放模式偏好应当被记住（期望 原始大小，实际 {0}）", reloaded.PreferredZoomMode));
+                }
+                else
+                {
+                    log.AppendLine("  OK   缩放模式偏好被记住并在下次启动时可用（原始大小）");
+                }
+            }
+            catch (Exception ex)
+            {
+                failures++;
+                log.AppendLine("  FAIL 窗口位置测试异常: " + ex.GetType().Name + " " + ex.Message);
+            }
+
+            log.AppendLine();
+        }
+
+        /// <summary>只存在内存里的设置服务（自检用，绝不碰用户的 %APPDATA%）。</summary>
+        private sealed class MemorySettingsService : ISettingsService
+        {
+            private AppSettings _current = new AppSettings();
+
+            public int SaveCount { get; private set; }
+
+            public string SettingsFilePath
+            {
+                get { return "(内存)"; }
+            }
+
+            public AppSettings Load()
+            {
+                return _current;
+            }
+
+            public void Save(AppSettings settings)
+            {
+                if (settings != null)
+                {
+                    _current = settings;
+                }
+
+                SaveCount++;
+            }
+        }
+
+        /// <summary>
+        /// 校验本地化。
+        ///
+        /// 这一块光"看起来没问题"是不够的，所以把三件容易出事的事都变成断言：
+        ///   1. **两套字典的键必须完全一致** —— 少一条意味着某种语言下会漏翻，
+        ///      多一条意味着有永远用不到的死键；
+        ///   2. **键不能和主题资源撞名** —— 撞了的话谁的字典后加入谁生效，
+        ///      会出现"切主题把界面文字改没了"这种诡异现象；
+        ///   3. **跑过的流程里一个漏翻都不能有** —— 取不到的键会被记录下来，
+        ///      这里断言记录是空的。
+        ///
+        /// 另外还会扫一遍 XAML 源码（源码在的话）：界面文件里**不允许再出现硬编码的中文**，
+        /// 否则"完整迁移"就只是一句口号。
+        /// </summary>
+        private static void CheckLocalization(ref int checks, ref int failures, StringBuilder log)
+        {
+            log.AppendLine("[40] 本地化（中 / 英）");
+
+            try
+            {
+                LocalizationService service = LocalizationService.Instance;
+
+                // ---- 1) 两套字典键集合一致 ----
+                checks++;
+                IList<string> chinese = service.GetKeys("zh-CN");
+                IList<string> english = service.GetKeys("en-US");
+
+                List<string> onlyChinese = new List<string>();
+                List<string> onlyEnglish = new List<string>();
+
+                for (int i = 0; i < chinese.Count; i++)
+                {
+                    if (!english.Contains(chinese[i]))
+                    {
+                        onlyChinese.Add(chinese[i]);
+                    }
+                }
+
+                for (int i = 0; i < english.Count; i++)
+                {
+                    if (!chinese.Contains(english[i]))
+                    {
+                        onlyEnglish.Add(english[i]);
+                    }
+                }
+
+                if (chinese.Count == 0 || english.Count == 0)
+                {
+                    failures++;
+                    log.AppendLine(string.Format(
+                        "  FAIL 语言字典没加载上（中文 {0} 条，英文 {1} 条）", chinese.Count, english.Count));
+                }
+                else if (onlyChinese.Count > 0 || onlyEnglish.Count > 0)
+                {
+                    failures++;
+                    log.AppendLine(string.Format(
+                        "  FAIL 两套字典的键不一致：仅中文有 {0} 条，仅英文有 {1} 条（前几个：{2} / {3}）",
+                        onlyChinese.Count,
+                        onlyEnglish.Count,
+                        onlyChinese.Count > 0 ? string.Join(", ", onlyChinese.GetRange(0, Math.Min(5, onlyChinese.Count)).ToArray()) : "-",
+                        onlyEnglish.Count > 0 ? string.Join(", ", onlyEnglish.GetRange(0, Math.Min(5, onlyEnglish.Count)).ToArray()) : "-"));
+                }
+                else
+                {
+                    log.AppendLine(string.Format(
+                        "  OK   两套字典键完全一致（各 {0} 条），不会出现漏翻或死键", chinese.Count));
+                }
+
+                // ---- 2) 不与主题资源撞名 ----
+                checks++;
+                List<string> conflicts = new List<string>();
+
+                if (Application.Current != null)
+                {
+                    for (int i = 0; i < chinese.Count; i++)
+                    {
+                        string key = chinese[i];
+
+                        // 语言字典自己是合并进去的，排除掉它再比
+                        if (Application.Current.Resources.Contains(key))
+                        {
+                            object value = Application.Current.Resources[key];
+
+                            if (!(value is string))
+                            {
+                                conflicts.Add(key);
+                            }
+                        }
+                    }
+                }
+
+                if (conflicts.Count > 0)
+                {
+                    failures++;
+                    log.AppendLine(string.Format(
+                        "  FAIL 有 {0} 个文案键与主题资源撞名（会让界面文字被主题覆盖）：{1}",
+                        conflicts.Count, string.Join(", ", conflicts.ToArray())));
+                }
+                else
+                {
+                    log.AppendLine("  OK   文案键与主题资源没有撞名");
+                }
+
+                // ---- 3) 切换语言 ----
+                checks++;
+                string original = service.CurrentCulture;
+                service.SetLanguage("en-US");
+                string englishSample = service["Menu_File"];
+                service.SetLanguage("zh-CN");
+                string chineseSample = service["Menu_File"];
+
+                if (englishSample == "Menu_File" || chineseSample == "Menu_File"
+                    || string.Equals(englishSample, chineseSample, StringComparison.Ordinal))
+                {
+                    failures++;
+                    log.AppendLine(string.Format(
+                        "  FAIL 切换语言没生效（英文=「{0}」中文=「{1}」）", englishSample, chineseSample));
+                }
+                else
+                {
+                    log.AppendLine(string.Format(
+                        "  OK   运行时切换语言生效（{0} ↔ {1}）", chineseSample, englishSample));
+                }
+
+                if (!string.Equals(original, service.CurrentCulture, StringComparison.OrdinalIgnoreCase))
+                {
+                    service.SetLanguage(original);
+                }
+
+                // ---- 4) 漏翻的键 ----
+                checks++;
+                service.ResetMissingKeys();
+
+                // 构造一次主窗口，把所有 {DynamicResource} 都求值一遍
+                MainViewModel viewModel = new MainViewModel(
+                    new WpfImageService(), new NullDialogService(), new ImmediateDispatcherService());
+
+                System.Windows.Threading.Dispatcher.CurrentDispatcher.Invoke(new Action(() =>
+                {
+                    try
+                    {
+                        Views.MainWindow window = new Views.MainWindow { DataContext = viewModel };
+                        window.Measure(new Size(1180, 760));
+                        window.Arrange(new Rect(0, 0, 1180, 760));
+                        window.UpdateLayout();
+                    }
+                    catch (Exception ex)
+                    {
+                        log.AppendLine("       [诊断] 构造主窗口时: " + ex.GetType().Name + " " + ex.Message);
+                    }
+                }));
+
+                List<string> missing = new List<string>();
+
+                for (int i = 0; i < service.MissingKeys.Count; i++)
+                {
+                    missing.Add(service.MissingKeys[i]);
+                }
+
+                if (missing.Count > 0)
+                {
+                    failures++;
+                    log.AppendLine(string.Format(
+                        "  FAIL 有 {0} 个键取不到值（界面会出现英文键名）：{1}",
+                        missing.Count, string.Join(", ", missing.ToArray())));
+                }
+                else
+                {
+                    log.AppendLine("  OK   构造主窗口后没有任何取不到的键");
+                }
+
+                // ---- 5) 源码扫描：界面里不允许再有硬编码中文 ----
+                checks++;
+                string sourceRoot = FindSourceRoot();
+
+                if (sourceRoot == null)
+                {
+                    log.AppendLine("  SKIP 找不到源码目录（已部署环境），跳过「界面无硬编码中文」的检查");
+                }
+                else
+                {
+                    List<string> offenders = new List<string>();
+
+                    string[] files = { "Views\\MainWindow.xaml", "Views\\PrintPreviewWindow.xaml" };
+
+                    for (int i = 0; i < files.Length; i++)
+                    {
+                        string path = Path.Combine(sourceRoot, files[i]);
+
+                        if (!File.Exists(path))
+                        {
+                            continue;
+                        }
+
+                        string text = File.ReadAllText(path);
+
+                        // 去掉 XAML 注释再找中文（注释里的中文是给人看的，不算界面文案）。
+                        // 另外要单独放过显式标记的豁免区（例如语言选择项 —— 语言名本来
+                        // 就该用它自己的文字显示，翻了反而找不到）。
+                        // 先摘掉显式豁免区，再摘注释 —— 顺序不能反，
+                        // 否则豁免标记本身会先被当成注释删掉，被豁免的内容就露出来了。
+                        text = System.Text.RegularExpressions.Regex.Replace(
+                            text,
+                            "<!--\\s*i18n-exempt:start.*?i18n-exempt:end\\s*-->",
+                            string.Empty,
+                            System.Text.RegularExpressions.RegexOptions.Singleline);
+
+                        text = System.Text.RegularExpressions.Regex.Replace(text, "<!--.*?-->", string.Empty,
+                            System.Text.RegularExpressions.RegexOptions.Singleline);
+
+                        System.Text.RegularExpressions.Match match =
+                            System.Text.RegularExpressions.Regex.Match(text, "[\\u4e00-\\u9fff]");
+
+                        if (match.Success)
+                        {
+                            // 报"出现了什么"而不是行号：剥掉注释之后行号会偏移，
+                            // 指向的位置是错的，反而会把人带到沟里。
+                            int start = Math.Max(0, match.Index - 30);
+                            int length = Math.Min(60, text.Length - start);
+                            offenders.Add(string.Format(
+                                "{0} → …{1}…",
+                                files[i],
+                                text.Substring(start, length).Replace("\r", " ").Replace("\n", " ")));
+                        }
+                    }
+
+                    if (offenders.Count > 0)
+                    {
+                        failures++;
+                        log.AppendLine(string.Format(
+                            "  FAIL 界面文件里还有硬编码中文（应当改用 {{DynamicResource}}）：{0}",
+                            string.Join(", ", offenders.ToArray())));
+                    }
+                    else
+                    {
+                        log.AppendLine("  OK   界面文件里已经没有硬编码中文（全部走语言字典）");
+                    }
+
+                    // ---- 6) 源码扫描：C# 里也不允许再有硬编码中文 ----
+                    //
+                    // 这一条是把"完整迁移"从承诺变成事实。它排除三类**不该翻**的地方：
+                    //   * Debug 输出（给开发看的诊断，翻了反而不好搜）；
+                    //   * 启动早期的 Program.cs（那时本地化还没加载）；
+                    //   * 崩溃日志与语言名（前者给开发看，后者要用自己的文字显示）。
+                    checks++;
+                    List<string> codeOffenders = new List<string>();
+
+                    string[] skipped = { "SelfTest.cs", "Program.cs", "LocalizationService.cs",
+                                         "CrashLogger.cs", "BitmapSnapshot.cs", "RelayCommand.cs" };
+
+                    string[] codeFolders = { "ViewModels", "Services", "Views", "Models", "Infrastructure" };
+
+                    for (int i = 0; i < codeFolders.Length; i++)
+                    {
+                        string folder = Path.Combine(sourceRoot, codeFolders[i]);
+
+                        if (!Directory.Exists(folder))
+                        {
+                            continue;
+                        }
+
+                        string[] codeFiles = Directory.GetFiles(folder, "*.cs", SearchOption.AllDirectories);
+
+                        for (int f = 0; f < codeFiles.Length; f++)
+                        {
+                            string name = Path.GetFileName(codeFiles[f]);
+
+                            if (Array.IndexOf(skipped, name) >= 0)
+                            {
+                                continue;
+                            }
+
+                            string text = File.ReadAllText(codeFiles[f]);
+                            string[] lines = text.Split('\n');
+                            bool inBlockComment = false;
+
+                            for (int n = 0; n < lines.Length; n++)
+                            {
+                                string line = lines[n];
+
+                                // 极简的注释剔除：够用即可（这里的目标是找字符串字面量，不是做词法分析）
+                                if (inBlockComment)
+                                {
+                                    int close = line.IndexOf("*/", StringComparison.Ordinal);
+
+                                    if (close < 0)
+                                    {
+                                        continue;
+                                    }
+
+                                    line = line.Substring(close + 2);
+                                    inBlockComment = false;
+                                }
+
+                                int open = line.IndexOf("/*", StringComparison.Ordinal);
+
+                                if (open >= 0)
+                                {
+                                    int close = line.IndexOf("*/", open + 2, StringComparison.Ordinal);
+
+                                    if (close < 0)
+                                    {
+                                        line = line.Substring(0, open);
+                                        inBlockComment = true;
+                                    }
+                                    else
+                                    {
+                                        line = line.Substring(0, open) + line.Substring(close + 2);
+                                    }
+                                }
+
+                                int lineComment = line.IndexOf("//", StringComparison.Ordinal);
+
+                                if (lineComment >= 0)
+                                {
+                                    line = line.Substring(0, lineComment);
+                                }
+
+                                if (line.IndexOf("Debug.WriteLine", StringComparison.Ordinal) >= 0)
+                                {
+                                    continue;
+                                }
+
+                                System.Text.RegularExpressions.Match codeMatch =
+                                    System.Text.RegularExpressions.Regex.Match(line, "\"[^\"]*[\\u4e00-\\u9fff][^\"]*\"");
+
+                                if (codeMatch.Success)
+                                {
+                                    codeOffenders.Add(string.Format(
+                                        "{0}:{1} {2}",
+                                        codeFolders[i],
+                                        n + 1,
+                                        codeMatch.Value.Length > 40
+                                            ? codeMatch.Value.Substring(0, 40) + "…"
+                                            : codeMatch.Value));
+                                }
+                            }
+                        }
+                    }
+
+                    if (codeOffenders.Count > 0)
+                    {
+                        failures++;
+                        log.AppendLine(string.Format(
+                            "  FAIL 还有 {0} 处 C# 硬编码中文（应当改用 Loc.T）：{1}",
+                            codeOffenders.Count,
+                            string.Join(" | ",
+                                codeOffenders.GetRange(0, Math.Min(6, codeOffenders.Count)).ToArray())));
+                    }
+                    else
+                    {
+                        log.AppendLine("  OK   C# 源码里也没有硬编码中文（全部走 Loc.T）");
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                failures++;
+                log.AppendLine("  FAIL 本地化测试异常: " + ex.GetType().Name + " " + ex.Message);
+            }
+
+            log.AppendLine();
+        }
+
+        /// <summary>
+        /// 从可执行文件位置往上找项目源码根目录。
+        ///
+        /// 源码在 build/bin/Release 往上三级；找不到就返回 null（部署环境里本来就没有源码），
+        /// 由调用方 Skip 而不是判失败 —— 检查"源码里有没有硬编码中文"只在开发机上才有意义。
+        /// </summary>
+        private static string FindSourceRoot()
+        {
+            try
+            {
+                string directory = AppDomain.CurrentDomain.BaseDirectory;
+
+                for (int i = 0; i < 5 && !string.IsNullOrEmpty(directory); i++)
+                {
+                    if (File.Exists(Path.Combine(directory, "PSText.csproj")))
+                    {
+                        return directory;
+                    }
+
+                    DirectoryInfo parent = Directory.GetParent(directory);
+                    directory = parent == null ? null : parent.FullName;
+                }
+            }
+            catch (Exception)
+            {
+            }
+
+            return null;
         }
 
         /// <summary>点 (x, y) 是否落在以 (x1,y1)-(x2,y2) 为轴的胶囊带内（用于校验涂抹范围）。</summary>

@@ -1,4 +1,5 @@
 using System;
+using System.Collections.ObjectModel;
 using System.Globalization;
 using System.IO;
 using System.Threading;
@@ -7,7 +8,9 @@ using System.Windows;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using PSText.Models;
+using PSText.Services.Imaging;
 using PSText.Services.Interfaces;
+using PSText.Services;
 
 namespace PSText.Services
 {
@@ -52,7 +55,7 @@ namespace PSText.Services
 
             if (string.IsNullOrWhiteSpace(filePath))
             {
-                throw new ArgumentException("保存路径不能为空。", "filePath");
+                throw new ArgumentException(Loc.T("Image_ReasonSaveNoPath"), "filePath");
             }
 
             ImageSaveOptions effectiveOptions = options ?? ImageSaveOptions.FromPath(filePath);
@@ -112,12 +115,12 @@ namespace PSText.Services
         {
             if (string.IsNullOrWhiteSpace(filePath))
             {
-                throw new ArgumentException("图片路径不能为空。", "filePath");
+                throw new ArgumentException(Loc.T("Image_ReasonEmptyPath"), "filePath");
             }
 
             if (!File.Exists(filePath))
             {
-                throw new FileNotFoundException("找不到图片文件：" + filePath, filePath);
+                throw new FileNotFoundException(Loc.T("Image_ReasonFileGone") + filePath, filePath);
             }
 
             ImageFileFormat headerFormat = DetectFormatByHeader(filePath);
@@ -152,6 +155,14 @@ namespace PSText.Services
             long fileSize)
         {
             BitmapDecoder decoder;
+            BitmapFrame frame;
+            ImageFileFormat format;
+            double dpiX;
+            double dpiY;
+            ushort orientation;
+            bool hasSourceMetadata;
+            bool hasColorProfile;
+
             using (FileStream stream = new FileStream(
                 filePath,
                 FileMode.Open,
@@ -179,20 +190,39 @@ namespace PSText.Services
                     stream,
                     BitmapCreateOptions.PreservePixelFormat,
                     cacheOption);
+
+                if (decoder.Frames == null || decoder.Frames.Count == 0)
+                {
+                    throw new InvalidOperationException(Loc.T("Image_ReasonNoFrames") + filePath);
+                }
+
+                frame = decoder.Frames[0];
+                format = ResolveFormat(headerFormat, decoder);
+                dpiX = frame.DpiX;
+                dpiY = frame.DpiY;
+
+                // ============================================================
+                //  以下三件事**必须在流关闭之前**做完
+                //
+                //  BitmapCacheOption.OnLoad 只保证**像素**被读进内存；
+                //  元数据查询（frame.Metadata / frame.ColorContexts）仍然是
+                //  惰性地回到解码器、最终回到那个 FileStream 上去的。
+                //  流一关，ContainsQuery 会安静地返回 false、GetQuery 返回 null ——
+                //  不抛异常、不留痕迹。
+                //
+                //  这个坑真实存在过：EXIF 方向标记原来就是在 using 块外面读的，
+                //  于是 orientation 永远是 1、"已按 EXIF 方向校正" 从来没生效过，
+                //  竖拍的照片一直显示成横的，而且因为不报错、又没人测过，一直没被发现。
+                // ============================================================
+                orientation = ReadOrientation(frame);
+
+                // 这里**只取两个布尔**。原因见 EncodeToFile 里的说明：
+                // BitmapMetadata / ColorContext 都有线程亲和性，不能跟着快照跨线程走；
+                // 真正要保留时由保存方在自己线程上从源文件重读。
+                hasSourceMetadata = ImageMetadataHelper.HasReadableMetadata(frame);
+                hasColorProfile = ImageMetadataHelper.HasReadableColorProfile(frame);
             }
 
-            if (decoder.Frames == null || decoder.Frames.Count == 0)
-            {
-                throw new InvalidOperationException("图片文件不包含可解码的图像帧：" + filePath);
-            }
-
-            BitmapFrame frame = decoder.Frames[0];
-            ImageFileFormat format = ResolveFormat(headerFormat, decoder);
-            double dpiX = frame.DpiX;
-            double dpiY = frame.DpiY;
-
-            // EXIF 方向标记必须在位图仍携带元数据时读取。
-            ushort orientation = ReadOrientation(frame);
             BitmapSource oriented = ApplyOrientation(frame, orientation);
             bool normalized = orientation > 1;
 
@@ -204,7 +234,9 @@ namespace PSText.Services
             // 复制像素后得到的是纯内存位图，可安全跨线程。
             BitmapSource materialized = Materialize(oriented);
 
-            return new ImageLoadResult(materialized, format, dpiX, dpiY, normalized, fileSize, filePath);
+            return new ImageLoadResult(
+                materialized, format, dpiX, dpiY, normalized, fileSize, filePath,
+                hasSourceMetadata, hasColorProfile);
         }
 
         /// <summary>
@@ -217,7 +249,7 @@ namespace PSText.Services
         {
             if (source == null)
             {
-                throw new InvalidOperationException("解码结果为空。");
+                throw new InvalidOperationException(Loc.T("Image_ReasonEmpty"));
             }
 
             int width = source.PixelWidth;
@@ -225,7 +257,7 @@ namespace PSText.Services
 
             if (width <= 0 || height <= 0)
             {
-                throw new InvalidOperationException("解码结果尺寸非法。");
+                throw new InvalidOperationException(Loc.T("Image_ReasonBadSize"));
             }
 
             // 统一用 Bgra32：后续滤镜 / 快照编码都按 4 字节/像素处理。
@@ -272,11 +304,13 @@ namespace PSText.Services
             double dpiY,
             bool normalized,
             long fileSize,
-            string filePath)
+            string filePath,
+            bool hasSourceMetadata = false,
+            bool hasColorProfile = false)
         {
             if (bitmap == null)
             {
-                throw new InvalidOperationException("解码失败：" + filePath);
+                throw new InvalidOperationException(Loc.T("Image_ReasonDecodeFailed") + filePath);
             }
 
             if (bitmap.CanFreeze && !bitmap.IsFrozen)
@@ -284,7 +318,8 @@ namespace PSText.Services
                 bitmap.Freeze();
             }
 
-            return new ImageLoadResult(bitmap, format, dpiX, dpiY, normalized, fileSize, filePath);
+            return new ImageLoadResult(
+                bitmap, format, dpiX, dpiY, normalized, fileSize, filePath, hasSourceMetadata, hasColorProfile);
         }
 
         private static ImageFileFormat ResolveFormat(ImageFileFormat headerFormat, BitmapDecoder decoder)
@@ -587,7 +622,49 @@ namespace PSText.Services
             // 这是 BitmapSource.DpiX/DpiY 只读情况下唯一可靠的写 DPI 方式（需求 P2-11）。
             BitmapSource source = PrepareForEncoding(bitmap, options.Format, dpiX, dpiY);
 
-            encoder.Frames.Add(BitmapFrame.Create(source, null, null, null));
+            // 元数据：在**当前线程**上从源文件重读一份。
+            //
+            // 为什么不把 BitmapMetadata 从解码处传过来：那个类型有线程亲和性。
+            // 解码跑在线程池线程上，传出来的对象在别的线程上一碰就抛
+            // "调用线程无法访问此对象，因为另一个线程拥有该对象" ——
+            // 而这类异常如果被 catch 吞掉，表现就是"元数据神秘消失"（本次真踩过）。
+            // 路径传过来、在这里现读，对象从生到用都在同一个线程上，问题不存在。
+            BitmapMetadata metadata = null;
+            ReadOnlyCollection<ColorContext> colorContexts = null;
+
+            if (options.PreserveMetadata && !string.IsNullOrWhiteSpace(options.MetadataSourcePath))
+            {
+                metadata = ImageMetadataHelper.LoadForSave(
+                    options.MetadataSourcePath,
+                    options.Format,
+                    source.PixelWidth,
+                    source.PixelHeight,
+                    out colorContexts);
+
+                if (metadata == null && string.IsNullOrEmpty(options.MetadataNote))
+                {
+                    options.MetadataNote = ImageMetadataHelper.DescribeSkipReason(
+                        options.MetadataSourcePath, options.Format);
+                }
+            }
+
+            // 元数据写不进去**不能让保存整个失败** —— 画面本身才是用户要的东西。
+            // 编码器拒绝时退回"不带元数据"再试一次，并把原因记下来。
+            BitmapFrame frame;
+
+            try
+            {
+                frame = BitmapFrame.Create(source, null, metadata, colorContexts);
+            }
+            catch (Exception ex) when (metadata != null || colorContexts != null)
+            {
+                options.MetadataNote = Loc.T("Image_MetadataRejected") + ex.Message;
+
+                System.Diagnostics.Debug.WriteLine("[WpfImageService] 元数据写入失败，退回无元数据: " + ex);
+                frame = BitmapFrame.Create(source, null, null, null);
+            }
+
+            encoder.Frames.Add(frame);
 
             ApplyEncoderOptions(encoder, options);
 
@@ -604,9 +681,22 @@ namespace PSText.Services
             }
         }
 
-        private static BitmapEncoder CreateEncoder(ImageFileFormat format)
+        /// <summary>安全读取元数据的格式名（读不到就返回"未知"）。</summary>
+        private static string SafeGetMetadataFormatName(BitmapMetadata metadata)
         {
-            switch (format)
+            try
+            {
+                string format = metadata == null ? null : metadata.Format;
+                return string.IsNullOrEmpty(format) ? Loc.T("Common_Unknown") : format;
+            }
+            catch (Exception)
+            {
+                return Loc.T("Common_Unknown");
+            }
+        }
+
+        private static BitmapEncoder CreateEncoder(ImageFileFormat format)
+        {            switch (format)
             {
                 case ImageFileFormat.Jpeg:
                     return new JpegBitmapEncoder();

@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Windows.Media.Imaging;
+using PSText.Services;
 
 namespace PSText.Models
 {
@@ -67,7 +68,7 @@ namespace PSText.Models
 
             if (imageWidth <= 0 || width <= 0 || height <= 0)
             {
-                throw new ArgumentOutOfRangeException("width", "区域尺寸必须为正数。");
+                throw new ArgumentOutOfRangeException("width", Loc.T("Edit_ReasonRegionPositive"));
             }
 
             int required = width * height * 4;
@@ -75,10 +76,10 @@ namespace PSText.Models
             if (before.Length < required || after.Length < required)
             {
                 throw new ArgumentException(
-                    string.Format("区域像素长度不足：需要 {0} 字节。", required));
+                    string.Format(Loc.T("Edit_ReasonRegionLength"), required));
             }
 
-            Label = string.IsNullOrWhiteSpace(label) ? "修补" : label;
+            Label = string.IsNullOrWhiteSpace(label) ? Loc.T("Retouch_Header") : label;
             _imageWidth = imageWidth;
             _x = x;
             _y = y;

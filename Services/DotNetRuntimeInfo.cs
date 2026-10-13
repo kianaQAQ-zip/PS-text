@@ -3,6 +3,7 @@ using System.Globalization;
 using System.Reflection;
 using System.Text;
 using Microsoft.Win32;
+using PSText.Services;
 
 namespace PSText.Services
 {
@@ -64,33 +65,33 @@ namespace PSText.Services
         /// <summary>进程位数文本。</summary>
         public string ProcessBitsText
         {
-            get { return Is64BitProcess ? "64 位" : "32 位"; }
+            get { return Is64BitProcess ? Loc.T("Runtime_Bits64") : Loc.T("Runtime_Bits32"); }
         }
 
         /// <summary>多行诊断文本（“关于”与“检测运行环境”共用）。</summary>
         public string ToDisplayText()
         {
             StringBuilder builder = new StringBuilder();
-            builder.AppendLine("PS-text 版本：" + (ExeVersionText ?? "未知"));
-            builder.AppendLine("程序路径：" + (ExePath ?? "未知"));
+            builder.AppendLine(Loc.T("Runtime_Version") + (ExeVersionText ?? Loc.T("Common_Unknown")));
+            builder.AppendLine(Loc.T("Runtime_ExePath") + (ExePath ?? Loc.T("Common_Unknown")));
             builder.AppendLine();
 
             if (ProbeSucceeded)
             {
-                builder.AppendLine(".NET Framework：" + (NetVersionText ?? "未知")
+                builder.AppendLine(".NET Framework：" + (NetVersionText ?? Loc.T("Common_Unknown"))
                                    + "（Release " + NetRelease.ToString(CultureInfo.InvariantCulture) + "）");
             }
             else
             {
-                builder.AppendLine(".NET Framework：无法读取（注册表不可访问）");
+                builder.AppendLine(Loc.T("Runtime_Runtime"));
             }
 
-            builder.AppendLine("CLR 版本：" + (ClrVersionText ?? "未知"));
-            builder.AppendLine("进程位数：" + ProcessBitsText);
-            builder.AppendLine("操作系统：" + (OsText ?? "未知"));
+            builder.AppendLine(Loc.T("Runtime_Clr") + (ClrVersionText ?? Loc.T("Common_Unknown")));
+            builder.AppendLine(Loc.T("Runtime_Bits") + ProcessBitsText);
+            builder.AppendLine(Loc.T("Runtime_Os") + (OsText ?? Loc.T("Common_Unknown")));
             builder.AppendLine();
-            builder.AppendLine("设置文件：" + (SettingsFilePath ?? "未知"));
-            builder.AppendLine("日志目录：" + (LogDirectory ?? "未知"));
+            builder.AppendLine(Loc.T("Runtime_SettingsFile") + (SettingsFilePath ?? Loc.T("Common_Unknown")));
+            builder.AppendLine(Loc.T("Runtime_LogFolder") + (LogDirectory ?? Loc.T("Common_Unknown")));
 
             if (!IsNet48OrLater)
             {
@@ -98,14 +99,14 @@ namespace PSText.Services
 
                 if (ProbeSucceeded)
                 {
-                    builder.AppendLine("⚠ 检测到 .NET Framework 版本低于 4.8。");
-                    builder.AppendLine("本程序需要 .NET Framework 4.8 才能完整运行，");
-                    builder.AppendLine("可能出现功能异常或崩溃，建议先安装：");
+                    builder.AppendLine(Loc.T("Runtime_WarnTooOld"));
+                    builder.AppendLine(Loc.T("Runtime_Need48"));
+                    builder.AppendLine(Loc.T("Runtime_MayFail"));
                 }
                 else
                 {
-                    builder.AppendLine("⚠ 无法确认 .NET Framework 版本。");
-                    builder.AppendLine("若程序出现异常，建议确认已安装 4.8 或更高版本：");
+                    builder.AppendLine(Loc.T("Runtime_WarnUnknown"));
+                    builder.AppendLine(Loc.T("Runtime_SuggestInstall"));
                 }
 
                 builder.AppendLine(DotNetRuntimeProbe.DownloadUrl);
@@ -333,7 +334,7 @@ namespace PSText.Services
                 // 否则 Win8.1 以上会被谎报成 6.2（本项目的 app.manifest 已声明 Win7~Win11）。
                 return string.Format(
                     CultureInfo.InvariantCulture,
-                    "{0} {1}.{2}（内部版本 {3}）",
+                    Loc.T("Runtime_OsVersion"),
                     os.Platform,
                     os.Version.Major,
                     os.Version.Minor,

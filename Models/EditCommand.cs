@@ -1,5 +1,6 @@
 using System;
 using System.Windows.Media.Imaging;
+using PSText.Services;
 using PSText.Infrastructure.History;
 using PSText.Infrastructure.Imaging;
 
@@ -129,7 +130,7 @@ namespace PSText.Models
                 throw new ArgumentNullException("after");
             }
 
-            Label = string.IsNullOrWhiteSpace(label) ? "基础调整" : label;
+            Label = string.IsNullOrWhiteSpace(label) ? Loc.T("Adjust_Label") : label;
             _states = new[] { before, after };
             _applyState = applyState;
             Timestamp = DateTime.Now;
@@ -177,7 +178,7 @@ namespace PSText.Models
             Action<EditState> applier = _applyState;
             if (applier == null)
             {
-                throw new InvalidOperationException("命令未绑定状态回调，无法撤销 / 重做。");
+                throw new InvalidOperationException(Loc.T("Edit_ReasonNoCallback"));
             }
 
             applier(state);
@@ -211,7 +212,7 @@ namespace PSText.Models
                 throw new ArgumentNullException("after");
             }
 
-            Label = string.IsNullOrWhiteSpace(label) ? "编辑" : label;
+            Label = string.IsNullOrWhiteSpace(label) ? Loc.T("Edit_Label") : label;
             _states = new[] { before, after };
             _applyState = applyState;
             Timestamp = DateTime.Now;
@@ -259,7 +260,7 @@ namespace PSText.Models
             Action<EditState> applier = _applyState;
             if (applier == null)
             {
-                throw new InvalidOperationException("命令未绑定状态回调，无法撤销 / 重做。");
+                throw new InvalidOperationException(Loc.T("Edit_ReasonNoCallback"));
             }
 
             applier(state);

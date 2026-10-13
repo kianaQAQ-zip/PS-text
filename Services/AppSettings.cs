@@ -4,6 +4,7 @@ using System.IO;
 using System.Text;
 using System.Xml;
 using System.Xml.Serialization;
+using PSText.Services;
 
 namespace PSText.Services
 {
@@ -36,6 +37,9 @@ namespace PSText.Services
             ThemePreference = ThemePreference.FollowSystem;
             RecentFiles = new List<string>();
             UndoDepth = 30;
+            PanelWidth = 0.0;
+            SavedZoomMode = -1;
+            LanguageCulture = string.Empty;
         }
 
         /// <summary>主题偏好。</summary>
@@ -46,6 +50,51 @@ namespace PSText.Services
 
         /// <summary>撤销步数上限。</summary>
         public int UndoDepth { get; set; }
+
+        // ============================================================
+        //  窗口 / 面板状态（M5）
+        //
+        //  窗口几何用 0 表示"还没保存过"（而不是靠 bool 标记），
+        //  这样旧版设置文件读进来时天然就是"没保存过"，不需要迁移代码。
+        // ============================================================
+
+        /// <summary>窗口左边（DIP；0 表示未保存）。</summary>
+        public double WindowLeft { get; set; }
+
+        /// <summary>窗口上边（DIP）。</summary>
+        public double WindowTop { get; set; }
+
+        /// <summary>窗口宽度（DIP；0 表示未保存）。</summary>
+        public double WindowWidth { get; set; }
+
+        /// <summary>窗口高度（DIP）。</summary>
+        public double WindowHeight { get; set; }
+
+        /// <summary>关闭时是否处于最大化。</summary>
+        public bool WindowMaximized { get; set; }
+
+        /// <summary>右侧编辑面板宽度（0 表示用默认值）。</summary>
+        public double PanelWidth { get; set; }
+
+        /// <summary>上次使用的缩放模式（-1 表示未保存）。</summary>
+        public int SavedZoomMode { get; set; }
+
+        /// <summary>界面语言（空表示跟随系统）。</summary>
+        public string LanguageCulture { get; set; }
+
+        /// <summary>是否保存过窗口位置（宽高都是有效值）。</summary>
+        [XmlIgnore]
+        public bool HasWindowBounds
+        {
+            get { return WindowWidth > 0.0 && WindowHeight > 0.0; }
+        }
+
+        /// <summary>是否保存过缩放模式。</summary>
+        [XmlIgnore]
+        public bool HasZoomModeSaved
+        {
+            get { return SavedZoomMode >= 0; }
+        }
 
         /// <summary>把路径加入最近文件列表：去重、置顶、限长。</summary>
         public void AddRecentFile(string filePath)
@@ -159,7 +208,7 @@ namespace PSText.Services
         {
             if (string.IsNullOrWhiteSpace(filePath))
             {
-                throw new ArgumentException("设置文件路径不能为空。", "filePath");
+                throw new ArgumentException(Loc.T("Settings_NoPath"), "filePath");
             }
 
             _filePath = filePath;
@@ -370,7 +419,7 @@ namespace PSText.Services
             catch (Exception ex)
             {
                 System.Diagnostics.Debug.WriteLine(
-                    "[XmlSettingsService] 写入设置失败 " + filePath + ": " + ex.Message);
+                    Loc.T("Settings_WriteFailed") + filePath + ": " + ex.Message);
                 return false;
             }
         }

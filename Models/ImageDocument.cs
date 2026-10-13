@@ -1,5 +1,8 @@
 using System;
+using System.Collections.ObjectModel;
+using System.Windows.Media;
 using System.Windows.Media.Imaging;
+using PSText.Services;
 
 namespace PSText.Models
 {
@@ -18,6 +21,20 @@ namespace PSText.Models
             double dpiY,
             long fileSizeBytes,
             bool isDirty)
+            : this(bitmap, filePath, format, dpiX, dpiY, fileSizeBytes, isDirty, false, false)
+        {
+        }
+
+        public ImageDocument(
+            BitmapSource bitmap,
+            string filePath,
+            ImageFileFormat format,
+            double dpiX,
+            double dpiY,
+            long fileSizeBytes,
+            bool isDirty,
+            bool hasSourceMetadata,
+            bool hasColorProfile)
         {
             if (bitmap == null)
             {
@@ -38,6 +55,9 @@ namespace PSText.Models
 
             DpiX = dpiX > 0.5 && !double.IsNaN(dpiX) ? dpiX : 96.0;
             DpiY = dpiY > 0.5 && !double.IsNaN(dpiY) ? dpiY : 96.0;
+
+            HasSourceMetadata = hasSourceMetadata;
+            HasColorProfile = hasColorProfile;
         }
 
         /// <summary>当前显示 / 打印用的位图。</summary>
@@ -61,6 +81,12 @@ namespace PSText.Models
         /// <summary>是否存在未保存的修改。</summary>
         public bool IsDirty { get; private set; }
 
+        /// <summary>源文件是否带有 EXIF / IPTC / XMP 元数据（仅供界面提示，见 ImageLoadResult 的说明）。</summary>
+        public bool HasSourceMetadata { get; private set; }
+
+        /// <summary>源文件是否带 ICC 色彩配置。</summary>
+        public bool HasColorProfile { get; private set; }
+
         public int PixelWidth
         {
             get { return Bitmap.PixelWidth; }
@@ -78,7 +104,7 @@ namespace PSText.Models
             {
                 if (string.IsNullOrEmpty(FilePath))
                 {
-                    return "未命名";
+                    return Loc.T("Dialog_Untitled");
                 }
 
                 try
@@ -114,7 +140,7 @@ namespace PSText.Models
                 double widthInch = PixelWidth / DpiX;
                 double heightInch = PixelHeight / DpiY;
                 return string.Format(
-                    "{0:0.##} × {1:0.##} 英寸 ({2:0.#} × {3:0.#} 厘米)",
+                    Loc.T("Meta_PhysicalSize"),
                     widthInch,
                     heightInch,
                     widthInch * 2.54,
@@ -161,7 +187,9 @@ namespace PSText.Models
                 loadResult.DpiX,
                 loadResult.DpiY,
                 loadResult.FileSizeBytes,
-                false);
+                false,
+                loadResult.HasSourceMetadata,
+                loadResult.HasColorProfile);
         }
 
         /// <summary>替换位图（编辑后）并标记为已修改。</summary>
@@ -172,7 +200,7 @@ namespace PSText.Models
                 throw new ArgumentNullException("newBitmap");
             }
 
-            return new ImageDocument(newBitmap, FilePath, Format, DpiX, DpiY, FileSizeBytes, true);
+            return new ImageDocument(newBitmap, FilePath, Format, DpiX, DpiY, FileSizeBytes, true, HasSourceMetadata, HasColorProfile);
         }
 
         /// <summary>标记保存完成（清除脏标记，同时更新路径 / 格式 / 文件大小）。</summary>
@@ -185,7 +213,9 @@ namespace PSText.Models
                 DpiX,
                 DpiY,
                 fileSizeBytes,
-                false);
+                false,
+                HasSourceMetadata,
+                HasColorProfile);
         }
 
         /// <summary>设置脏标记。</summary>
@@ -196,13 +226,13 @@ namespace PSText.Models
                 return this;
             }
 
-            return new ImageDocument(Bitmap, FilePath, Format, DpiX, DpiY, FileSizeBytes, isDirty);
+            return new ImageDocument(Bitmap, FilePath, Format, DpiX, DpiY, FileSizeBytes, isDirty, HasSourceMetadata, HasColorProfile);
         }
 
         /// <summary>更新 DPI（不改变像素数据）。</summary>
         public ImageDocument WithDpi(double dpiX, double dpiY)
         {
-            return new ImageDocument(Bitmap, FilePath, Format, dpiX, dpiY, FileSizeBytes, true);
+            return new ImageDocument(Bitmap, FilePath, Format, dpiX, dpiY, FileSizeBytes, true, HasSourceMetadata, HasColorProfile);
         }
     }
 }

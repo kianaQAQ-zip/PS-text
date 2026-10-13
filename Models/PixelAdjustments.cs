@@ -1,4 +1,5 @@
 using System;
+using PSText.Services;
 
 namespace PSText.Models
 {
@@ -67,11 +68,11 @@ namespace PSText.Models
         {
             if (IsNeutral)
             {
-                return "无调整";
+                return Loc.T("Step_NoAdjustments");
             }
 
             return string.Format(
-                "亮度 {0:0} / 对比度 {1:0} / 饱和度 {2:0} / 色温 {3:0}",
+                Loc.T("Adjust_Summary"),
                 Brightness,
                 Contrast,
                 Saturation,

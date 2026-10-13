@@ -2,6 +2,7 @@ using System;
 using System.Threading;
 using System.Threading.Tasks;
 using PSText.Infrastructure.Imaging;
+using PSText.Services;
 
 namespace PSText.Services.Filters
 {
@@ -75,7 +76,7 @@ namespace PSText.Services.Filters
 
             if (mask == null || mask.Length < width * height)
             {
-                throw new ArgumentException("掩膜长度必须与图像像素数一致。", "mask");
+                throw new ArgumentException(Loc.T("Retouch_ReasonMaskLength"), "mask");
             }
 
             byte[] sourcePixels = source.GetPixels();
@@ -143,7 +144,7 @@ namespace PSText.Services.Filters
                 throw new ArgumentOutOfRangeException(
                     "mask",
                     string.Format(
-                        "标记区域过大（求解范围 {0} × {1} px），请分批标记后再填充。",
+                        Loc.T("Retouch_ReasonTooLarge"),
                         roiWidth, roiHeight));
             }
 

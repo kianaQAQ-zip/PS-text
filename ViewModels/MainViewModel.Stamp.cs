@@ -8,6 +8,7 @@ using System.Windows.Media.Imaging;
 using PSText.Infrastructure.Imaging;
 using PSText.Models;
 using PSText.Services.Filters;
+using PSText.Services;
 
 namespace PSText.ViewModels
 {
@@ -172,18 +173,18 @@ namespace PSText.ViewModels
             {
                 string brush = string.Format(
                     CultureInfo.CurrentCulture,
-                    "笔刷 {0:0} px · 硬度 {1}",
+                    Loc.T("Stamp_Brush"),
                     _brushRadius,
                     BrushHardnessPercentText);
 
                 if (!_hasCloneStampSource)
                 {
-                    return brush + "。按住 Alt 在画布上点一下取源，然后在要去掉的地方拖拽涂抹。";
+                    return brush + Loc.T("Stamp_ModeHint");
                 }
 
                 return string.Format(
                     CultureInfo.CurrentCulture,
-                    "{0}；源点 ({1:0}, {2:0})。在别处拖拽涂抹即可，每次松开鼠标记一步历史。",
+                    Loc.T("Stamp_SourceInfo"),
                     brush,
                     _cloneStampSourceX,
                     _cloneStampSourceY);
@@ -216,7 +217,7 @@ namespace PSText.ViewModels
 
             StatusMessage = string.Format(
                 CultureInfo.CurrentCulture,
-                "已取源点 ({0:0}, {1:0})，现在在要去掉的地方拖拽涂抹",
+                Loc.T("Stamp_SourceSet"),
                 x,
                 y);
         }
@@ -286,8 +287,8 @@ namespace PSText.ViewModels
             RaiseTrailChanged();
 
             StatusMessage = _hasCloneStampSource
-                ? "正在涂抹……松开鼠标应用这一笔"
-                : "尚未取源：按住 Alt 点一下画布指定要复制的位置";
+                ? Loc.T("Stamp_PaintingRelease")
+                : Loc.T("Stamp_SourceHint");
         }
 
         private void UpdateStampStroke(double imageX, double imageY)
@@ -348,7 +349,7 @@ namespace PSText.ViewModels
 
             if (!_hasCloneStampSource)
             {
-                StatusMessage = "仿制图章：请先按住 Alt 在画布上点一下取源，再涂抹";
+                StatusMessage = Loc.T("Stamp_NeedSource");
                 return;
             }
 
@@ -386,7 +387,7 @@ namespace PSText.ViewModels
             }
 
             // 涂抹同样是破坏性操作：先把标注烘进像素，避免涂完之后标注全部错位
-            FlattenAnnotations("合并标注（涂抹前）");
+            FlattenAnnotations(Loc.T("Stamp_FlattenBefore"));
 
             IsBusy = true;
 
@@ -397,7 +398,7 @@ namespace PSText.ViewModels
                 double dpiY = _document.DpiY;
 
                 PixelBuffer source = PixelBuffer.FromBitmap(_document.Bitmap);
-                StatusMessage = "正在涂抹……";
+                StatusMessage = Loc.T("Stamp_Painting");
 
                 PixelRegion painted = new PixelRegion();
 
@@ -425,7 +426,7 @@ namespace PSText.ViewModels
 
                 if (painted.IsEmpty)
                 {
-                    StatusMessage = "本次涂抹没有产生改动（可能源位置超出了画布）";
+                    StatusMessage = Loc.T("Stamp_StrokeNoChange");
                     return;
                 }
 
@@ -439,7 +440,7 @@ namespace PSText.ViewModels
                 EndAdjustmentSession();
 
                 RegionEditCommand command = new RegionEditCommand(
-                    "仿制图章",
+                    Loc.T("Retouch_CloneStamp"),
                     imageWidth,
                     painted.X,
                     painted.Y,
@@ -453,18 +454,18 @@ namespace PSText.ViewModels
 
                 StatusMessage = string.Format(
                     CultureInfo.CurrentCulture,
-                    "已涂抹一笔（改动区域 {0} × {1}，历史占用 {2}）",
+                    Loc.T("Stamp_StrokeDone"),
                     painted.Width,
                     painted.Height,
                     _history.MemoryUsageText);
             }
             catch (OperationCanceledException)
             {
-                StatusMessage = "已取消涂抹";
+                StatusMessage = Loc.T("Stamp_StrokeCanceled");
             }
             catch (Exception ex)
             {
-                HandleError("仿制图章涂抹失败。", ex, true);
+                HandleError(Loc.T("Stamp_Failed"), ex, true);
             }
             finally
             {

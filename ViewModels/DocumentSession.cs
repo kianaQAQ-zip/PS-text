@@ -1,6 +1,7 @@
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Globalization;
+using PSText.Services;
 using PSText.Infrastructure;
 using PSText.Infrastructure.History;
 using PSText.Infrastructure.Imaging;
@@ -179,7 +180,7 @@ namespace PSText.ViewModels
         /// <summary>标签上显示的名字。</summary>
         public string DisplayName
         {
-            get { return _document == null ? "（空）" : _document.FileName; }
+            get { return _document == null ? Loc.T("Tab_Empty") : _document.FileName; }
         }
 
         /// <summary>标签标题（带未保存标记）。</summary>
@@ -195,16 +196,16 @@ namespace PSText.ViewModels
             {
                 if (_document == null)
                 {
-                    return "空标签页（打开图片后就有了）";
+                    return Loc.T("Tab_EmptyHint");
                 }
 
                 return string.Format(
                     CultureInfo.CurrentCulture,
                     "{0}\n{1} · {2}{3}",
-                    _document.FilePath ?? "（尚未保存到文件）",
+                    _document.FilePath ?? Loc.T("Tab_UnsavedToFile"),
                     _document.PixelSizeText,
                     _document.DpiText,
-                    IsDirty ? "\n有未保存的修改" : string.Empty);
+                    IsDirty ? Loc.T("Tab_Dirty") : string.Empty);
             }
         }
 

@@ -2,6 +2,7 @@ using System;
 using System.Threading;
 using System.Threading.Tasks;
 using PSText.Infrastructure.Imaging;
+using PSText.Services;
 
 namespace PSText.Services.Filters
 {
@@ -67,7 +68,7 @@ namespace PSText.Services.Filters
             {
                 throw new ArgumentOutOfRangeException(
                     "targetWidth",
-                    string.Format("目标尺寸不可用：{0} × {1}（单边上限 {2}，总像素上限 {3}）。",
+                    string.Format(Loc.T("Pixel_ReasonTargetInvalid"),
                         targetWidth, targetHeight, MaxDimension, MaxPixels));
             }
 

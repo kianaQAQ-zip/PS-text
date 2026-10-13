@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using PSText.Services;
 
 namespace PSText.Models
 {
@@ -31,7 +32,7 @@ namespace PSText.Models
                 throw new ArgumentNullException("apply");
             }
 
-            Label = string.IsNullOrWhiteSpace(label) ? "标注" : label;
+            Label = string.IsNullOrWhiteSpace(label) ? Loc.T("Annotation_Tab") : label;
             _before = CloneList(before);
             _after = CloneList(after);
             _apply = apply;
@@ -142,7 +143,7 @@ namespace PSText.Models
                 throw new ArgumentNullException("apply");
             }
 
-            Label = string.IsNullOrWhiteSpace(label) ? "合并标注" : label;
+            Label = string.IsNullOrWhiteSpace(label) ? Loc.T("Ann_Flatten") : label;
             _states = new[] { before, after };
             _beforeObjects = AnnotationEditCommand.CloneList(beforeObjects);
             _afterObjects = AnnotationEditCommand.CloneList(afterObjects);

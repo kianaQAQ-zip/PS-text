@@ -25,7 +25,7 @@
 - WPF + .NET Framework 4.8，`AnyCPU + Prefer32Bit=true`（32 位运行）。
 - **零第三方 NuGet**——引入任何依赖前必须先向用户确认。
 - 构建产物在 `build/bin`（`Directory.Build.props` 定制），`.csproj` 为传统显式包含（**新文件必须手工加 `<Compile Include>`**）。
-- 自检在 `SelfTest.cs`（约 10,700 行 / **311 断言**），`PSText.exe --selftest` 运行。
+- 自检在 `SelfTest.cs`（约 11,900 行 / **346 断言**），`PSText.exe --selftest` 运行。
   ⚠️ 其中**文件关联的写入流程约 18 项在本机是 Skip 的**（本机工具层拦下可执行文件写注册表，
   已核实非代码问题）。自检先探测 HKCU 可写性，不可写就明确 Skip，避免恒红。
 - MVVM：VM 只依赖 `IImageService / IDialogService / IDispatcherService / IPrintService`，**不得引用 WPF 控件类型**。
@@ -188,3 +188,21 @@
   用红通道比对等于比常量、断言会变成空转（曾因此让一条断言长期无效）。
 - `AdjustmentsHolder` 是 `internal`，`DocumentSession` 是 `public` ⇒ 相关属性要标 `internal`，否则 CS0053。
 
+## 水印平铺 · EXIF/ICC · 状态记忆 · i18n（2026-10-13 完成）
+- **平铺按对角线铺**：网格转 30° 后按宽高铺会在四角留白；**瓦片数必须设上限**
+  （间距是百分比，3% 在 20000px 图上是十几万瓦片，会卡死界面）。
+- ⚠️ **`BitmapMetadata` / `ColorContext` 有线程亲和性**：解码在线程池线程，存进快照后在界面线程读会抛
+  "调用线程无法访问此对象"。**被 catch 掉之后表现成"元数据神秘消失"** —— 排查要点是别信 catch 后的
+  null 返回值，要去掉 catch 看真实异常。
+  定案：**保存时在同一线程从源文件重读**，快照里只留布尔；`ImageSaveOptions` 传**路径**不传对象。
+- **保存时方向标记必须清零**（像素已在加载时转过），**EXIF 缩略图必须丢弃**（那是编辑前的旧画面），
+  **元数据格式必须与目标编码器一致**（跨格式一律丢弃 + 明确告知，不静默丢）。
+- ⚠️ **EXIF 方向标记必须在 `FileStream` 的 `using` 内读取**：`OnLoad` 只保证像素进内存，
+  元数据查询仍要回源流；在 using 外读会静默返回 null ⇒ 方向永远是 1 ⇒ **竖拍照片一直显示成横的**。
+- **窗口位置恢复必须先做屏幕校验**（`WindowPlacement.TryFit` 纯函数）：显示器配置会变，
+  坐标落在已拔掉的屏上就变成"程序启动了但没界面"。校验不过就居中，别硬用。
+- **i18n 用 `{DynamicResource Key}`**：切语言时整本字典换掉，界面自动刷新。
+  ⚠️ 试过"标记扩展返回绑定"，在这条工具链上会在 **XAML 编译期**解析它并报"键不能为 null"。
+  ⚠️ **重复键会让整本 ResourceDictionary 加载失败**，且表现是所有 `{DynamicResource}` 变空串（不报错）。
+- **两道源码守卫**（自检 [40]）：界面与 C# 都不允许硬编码中文（`Debug` 输出 / `Program.cs` /
+  `CrashLogger` / 语言名除外）。这条守卫真抓到过 `InputGestureText="空格"` —— 值得保留。

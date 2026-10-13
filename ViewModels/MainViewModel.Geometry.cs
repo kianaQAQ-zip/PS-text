@@ -5,6 +5,7 @@ using System.Windows.Input;
 using System.Windows.Media;
 using PSText.Infrastructure;
 using PSText.Services.Filters;
+using PSText.Services;
 
 namespace PSText.ViewModels
 {
@@ -331,12 +332,12 @@ namespace PSText.ViewModels
             {
                 if (_document == null)
                 {
-                    return "未打开图片";
+                    return Loc.T("Status_NoImage");
                 }
 
                 return string.Format(
                     CultureInfo.CurrentCulture,
-                    "原始：{0} × {1} px　{2:0.0} × {3:0.0} cm　{4:0.#} DPI",
+                    Loc.T("Geo_Current"),
                     _document.PixelWidth,
                     _document.PixelHeight,
                     _document.PixelWidth / DocumentDpiX * 2.54,
@@ -362,19 +363,19 @@ namespace PSText.ViewModels
                 {
                     return string.Format(
                         CultureInfo.CurrentCulture,
-                        "输出尺寸超出可处理范围（单边上限 {0} px、总像素上限 {1} 千万）",
+                        Loc.T("Geo_TooLargeOutput"),
                         Resampler.MaxDimension,
                         Resampler.MaxPixels / 10000000L);
                 }
 
                 if (width == _document.PixelWidth && height == _document.PixelHeight)
                 {
-                    return "与原图尺寸相同，无需应用";
+                    return Loc.T("Geo_NoChangeNeeded");
                 }
 
                 return string.Format(
                     CultureInfo.CurrentCulture,
-                    "将输出：{0} × {1} px　{2:0.0} × {3:0.0} cm",
+                    Loc.T("Geo_WillOutput"),
                     width,
                     height,
                     width / DocumentDpiX * 2.54,
@@ -522,7 +523,7 @@ namespace PSText.ViewModels
 
                 if (!Resampler.IsValidSize(width, height))
                 {
-                    return "旋转后的画布超出可处理范围，请减小角度或先缩小图片";
+                    return Loc.T("Geo_TooLargeCanvas");
                 }
 
                 bool isRightAngle = Math.Abs(_rotationAngle % 90.0) < 1e-6;
@@ -530,20 +531,20 @@ namespace PSText.ViewModels
 
                 if (isRightAngle)
                 {
-                    suffix = "· 90° 倍数，无画质损失，无空白角";
+                    suffix = Loc.T("Geo_Rotate90Lossless");
                 }
                 else if (_rotationCropToInscribed)
                 {
-                    suffix = "· 已裁掉空白角";
+                    suffix = Loc.T("Geo_CroppedCorners");
                 }
                 else
                 {
-                    suffix = "· 四角填充：" + GetRotationFillDisplayName(_rotationFill);
+                    suffix = Loc.T("Geo_CornerFill") + GetRotationFillDisplayName(_rotationFill);
                 }
 
                 return string.Format(
                     CultureInfo.CurrentCulture,
-                    "将输出：{0} × {1} px　{2}",
+                    Loc.T("Geo_WillOutputSimple"),
                     width,
                     height,
                     suffix);
@@ -555,13 +556,13 @@ namespace PSText.ViewModels
             switch (fill)
             {
                 case RotationFill.White:
-                    return "白色";
+                    return Loc.T("Common_White");
                 case RotationFill.Black:
-                    return "黑色";
+                    return Loc.T("Common_Black");
                 case RotationFill.Gray:
-                    return "灰色";
+                    return Loc.T("Rotate_FillGray");
                 default:
-                    return "透明";
+                    return Loc.T("Rotate_FillTransparent");
             }
         }
 
@@ -718,7 +719,7 @@ namespace PSText.ViewModels
 
             StatusMessage = string.Format(
                 CultureInfo.CurrentCulture,
-                "目标尺寸已设为原图的 {0:0.#}%（{1} × {2} px）",
+                Loc.T("Geo_PercentSet"),
                 percent,
                 ComputedResizeWidthPixels,
                 ComputedResizeHeightPixels);
@@ -741,7 +742,7 @@ namespace PSText.ViewModels
 
             string label = string.Format(
                 CultureInfo.CurrentCulture,
-                "调整尺寸 {0}×{1}",
+                Loc.T("Geo_Resize"),
                 width,
                 height);
 
@@ -775,7 +776,7 @@ namespace PSText.ViewModels
             Color? background = ResolveRotationBackground();
             bool crop = _rotationCropToInscribed;
 
-            string label = string.Format(CultureInfo.CurrentCulture, "旋转 {0:0.#}°", angle);
+            string label = string.Format(CultureInfo.CurrentCulture, Loc.T("Geo_Rotate"), angle);
 
             GeometryFilters geometry = _geometryFilters;
             _pendingOperation = ApplyRotationInternalAsync(label, geometry, angle, background, crop);

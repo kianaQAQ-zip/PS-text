@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Windows;
 using System.Windows.Media;
 using Microsoft.Win32;
+using PSText.Services;
 
 namespace PSText.Services
 {
@@ -131,18 +132,18 @@ namespace PSText.Services
             switch (preference)
             {
                 case ThemePreference.Dark:
-                    return "深色";
+                    return Loc.T("Menu_ThemeDark");
                 case ThemePreference.Light:
-                    return "浅色";
+                    return Loc.T("Menu_ThemeLight");
                 default:
-                    return "跟随系统";
+                    return Loc.T("Menu_ThemeFollowSystem");
             }
         }
 
         /// <summary>实际主题的中文显示名。</summary>
         public static string GetThemeDisplayName(AppTheme theme)
         {
-            return theme == AppTheme.Dark ? "深色" : "浅色";
+            return theme == AppTheme.Dark ? Loc.T("Menu_ThemeDark") : Loc.T("Menu_ThemeLight");
         }
 
         /// <summary>

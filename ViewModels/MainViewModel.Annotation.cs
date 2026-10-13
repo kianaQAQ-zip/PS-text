@@ -11,6 +11,7 @@ using PSText.Infrastructure.Imaging;
 using PSText.Models;
 using PSText.Services.Filters;
 using Rect = System.Windows.Rect;
+using PSText.Services;
 
 namespace PSText.ViewModels
 {
@@ -203,7 +204,7 @@ namespace PSText.ViewModels
         private Color _annotationColor = Color.FromRgb(0xE2, 0x4B, 0x4A);
         private double _annotationStrokeWidth = 4.0;
         private double _annotationFontSize = 28.0;
-        private string _annotationText = "标注文字";
+        private string _annotationText = Loc.T("Ann_DefaultText");
         private double _annotationCoverSize = 12.0;
         private MosaicStyle _annotationMosaicStyle = MosaicStyle.Pixelate;
 
@@ -239,9 +240,9 @@ namespace PSText.ViewModels
             BeginAnnotationCommand = new RelayCommand(BeginAnnotation, () => HasDocument && !IsBusy && !IsAnnotationMode);
             ExitAnnotationCommand = new RelayCommand(ExitAnnotation, () => IsAnnotationMode);
             DeleteSelectedAnnotationCommand = new RelayCommand(DeleteSelectedAnnotation, () => HasSelectedAnnotation && !IsBusy);
-            ClearAnnotationsCommand = new RelayCommand(() => CommitAnnotationChange("清空标注", new List<AnnotationObject>()), () => AnnotationCount > 0 && !IsBusy);
+            ClearAnnotationsCommand = new RelayCommand(() => CommitAnnotationChange(Loc.T("Ann_Clear"), new List<AnnotationObject>()), () => AnnotationCount > 0 && !IsBusy);
             FlattenAnnotationsCommand = new RelayCommand(
-                () => FlattenAnnotations("合并标注"),
+                () => FlattenAnnotations(Loc.T("Ann_Flatten")),
                 () => AnnotationCount > 0 && !IsBusy);
         }
 
@@ -291,7 +292,7 @@ namespace PSText.ViewModels
                 OnPropertyChanged("IsMosaicToolSelected");
                 OnPropertyChanged("ShowCoverControls");
 
-                StatusMessage = "标注工具：" + GetAnnotationToolName(value);
+                StatusMessage = Loc.T("Ann_ToolChanged") + GetAnnotationToolName(value);
             }
         }
 
@@ -438,8 +439,8 @@ namespace PSText.ViewModels
             get
             {
                 return _annotationMosaicStyle == MosaicStyle.Blur
-                    ? string.Format(CultureInfo.CurrentCulture, "模糊半径 {0:0.#} px", _annotationCoverSize)
-                    : string.Format(CultureInfo.CurrentCulture, "马赛克块 {0:0} px", _annotationCoverSize);
+                    ? string.Format(CultureInfo.CurrentCulture, Loc.T("Ann_CoverBlur"), _annotationCoverSize)
+                    : string.Format(CultureInfo.CurrentCulture, Loc.T("Ann_CoverPixelate"), _annotationCoverSize);
             }
         }
 
@@ -545,14 +546,14 @@ namespace PSText.ViewModels
             {
                 if (!HasSelectedAnnotation)
                 {
-                    return "未选中任何标注。点击画布上的标注即可选中，选中后可改颜色 / 线宽 / 字号，或拖动挪位。";
+                    return Loc.T("Ann_NoneSelected");
                 }
 
                 AnnotationObject item = _annotations[_selectedAnnotationIndex];
 
                 return string.Format(
                     CultureInfo.CurrentCulture,
-                    "已选中第 {0} 个标注（{1}）",
+                    Loc.T("Ann_Selected"),
                     _selectedAnnotationIndex + 1,
                     GetAnnotationToolName(item.Kind));
             }
@@ -582,7 +583,7 @@ namespace PSText.ViewModels
             CancelAnnotationGesture();
 
             IsAnnotationMode = true;
-            StatusMessage = "标注模式：在画布上拖拽绘制" + GetAnnotationToolName(_annotationTool) + "；点击已画的标注可选中并改参数";
+            StatusMessage = Loc.T("Ann_ModeHintPrefix") + GetAnnotationToolName(_annotationTool) + Loc.T("Ann_ModeHintSuffix");
         }
 
         private void ExitAnnotation()
@@ -590,7 +591,7 @@ namespace PSText.ViewModels
             IsAnnotationMode = false;
             CancelAnnotationGesture();
             SelectedAnnotationIndex = -1;
-            StatusMessage = "已退出标注模式（标注已保留，再次进入可继续编辑）";
+            StatusMessage = Loc.T("Ann_ModeExited");
         }
 
         #endregion
@@ -781,7 +782,7 @@ namespace PSText.ViewModels
 
                 if (_gestureSnapshot != null)
                 {
-                    CommitAnnotationChange("缩放标注", _annotations, _gestureSnapshot);
+                    CommitAnnotationChange(Loc.T("Ann_Resize"), _annotations, _gestureSnapshot);
                 }
 
                 _gestureSnapshot = null;
@@ -803,7 +804,7 @@ namespace PSText.ViewModels
 
                 EnsureMinimumSize(_annotations.ElementAtOrDefault(_selectedAnnotationIndex));
 
-                string label = "移动标注";
+                string label = Loc.T("Ann_Move");
                 CommitAnnotationChange(label, _annotations, _gestureSnapshot);
                 _gestureSnapshot = null;
                 return;
@@ -837,7 +838,7 @@ namespace PSText.ViewModels
             _annotationItems.Remove(_pendingItem);
             _pendingItem = null;
 
-            string createdLabel = "添加" + GetAnnotationToolName(created.Kind);
+            string createdLabel = Loc.T("Batch_Add") + GetAnnotationToolName(created.Kind);
             CommitAnnotationChange(createdLabel, _annotations, _gestureSnapshot);
             _gestureSnapshot = null;
 
@@ -1163,7 +1164,7 @@ namespace PSText.ViewModels
             List<AnnotationObject> before = AnnotationEditCommand.CloneList(_annotations);
             _annotations.RemoveAt(_selectedAnnotationIndex);
 
-            CommitAnnotationChange("删除标注", _annotations, before);
+            CommitAnnotationChange(Loc.T("Ann_Delete"), _annotations, before);
             SelectedAnnotationIndex = -1;
         }
 
@@ -1201,7 +1202,7 @@ namespace PSText.ViewModels
 
             RebuildAnnotationHandles();
 
-            CommitAnnotationChange("修改标注参数", _annotations, before, rebuildItems: false);
+            CommitAnnotationChange(Loc.T("Ann_ChangeParams"), _annotations, before, rebuildItems: false);
         }
 
         /// <summary>
@@ -1232,7 +1233,7 @@ namespace PSText.ViewModels
 
             StatusMessage = string.Format(
                 CultureInfo.CurrentCulture,
-                "已{0}（当前 {1} 个标注）",
+                Loc.T("Ann_Changed"),
                 label,
                 _annotations.Count);
         }
@@ -1317,7 +1318,7 @@ namespace PSText.ViewModels
                     ApplyAnnotationSnapshot),
                 after);
 
-            StatusMessage = label + "完成（" + _history.MemoryUsageText + "）";
+            StatusMessage = label + Loc.T("Adjust_DonePrefix") + _history.MemoryUsageText + "）";
 
             return true;
         }
@@ -1371,19 +1372,19 @@ namespace PSText.ViewModels
             switch (kind)
             {
                 case AnnotationKind.Rectangle:
-                    return "矩形";
+                    return Loc.T("Annotation_Rectangle");
                 case AnnotationKind.Ellipse:
-                    return "椭圆";
+                    return Loc.T("Annotation_Ellipse");
                 case AnnotationKind.NumberBadge:
-                    return "序号";
+                    return Loc.T("Ann_ToolBadge");
                 case AnnotationKind.Highlight:
-                    return "高亮";
+                    return Loc.T("Annotation_Highlight");
                 case AnnotationKind.Text:
-                    return "文字";
+                    return Loc.T("Text_Content");
                 case AnnotationKind.Mosaic:
-                    return "遮盖";
+                    return Loc.T("Ann_ToolCover");
                 default:
-                    return "箭头";
+                    return Loc.T("Annotation_Arrow");
             }
         }
     }

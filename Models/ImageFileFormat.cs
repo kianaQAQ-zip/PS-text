@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using PSText.Services;
 
 namespace PSText.Models
 {
@@ -128,20 +129,20 @@ namespace PSText.Models
                 case ImageFileFormat.Gif:
                     return "GIF";
                 default:
-                    return "未知";
+                    return Loc.T("Common_Unknown");
             }
         }
 
         /// <summary>构造 OpenFileDialog 用的过滤器字符串。</summary>
         public static string BuildOpenFilter()
         {
-            return "所有支持的图片|*.jpg;*.jpeg;*.jpe;*.jfif;*.png;*.bmp;*.dib;*.tif;*.tiff;*.gif"
-                   + "|JPEG 图片|*.jpg;*.jpeg;*.jpe;*.jfif"
-                   + "|PNG 图片|*.png"
-                   + "|BMP 图片|*.bmp;*.dib"
-                   + "|TIFF 图片|*.tif;*.tiff"
-                   + "|GIF 图片|*.gif"
-                   + "|所有文件|*.*";
+            return Loc.T("Filter_AllSupported")
+                   + Loc.T("Filter_JpegExt")
+                   + Loc.T("Filter_PngExt")
+                   + Loc.T("Filter_BmpExt")
+                   + Loc.T("Filter_Tiff")
+                   + Loc.T("Filter_Gif")
+                   + Loc.T("Filter_AllFiles");
         }
     }
 }

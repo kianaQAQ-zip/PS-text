@@ -7,6 +7,7 @@ using PSText.Infrastructure;
 using PSText.Models;
 using PSText.Services.Filters;
 using Rect = System.Windows.Rect;
+using PSText.Services;
 
 namespace PSText.ViewModels
 {
@@ -166,8 +167,8 @@ namespace PSText.ViewModels
                 RelayCommand.RaiseCanExecuteChanged();
 
                 StatusMessage = value == RetouchTool.CloneStamp
-                    ? "仿制图章：按住 Alt 在画布上点一下取源，再拖拽涂抹"
-                    : "智能填充：在画布上拖拽矩形框住要去掉的内容";
+                    ? Loc.T("Retouch_CloneHint")
+                    : Loc.T("Retouch_HealHint");
             }
         }
 
@@ -243,12 +244,12 @@ namespace PSText.ViewModels
             {
                 if (_document == null)
                 {
-                    return "未打开图片";
+                    return Loc.T("Status_NoImage");
                 }
 
                 if (_retouchMaskPixels <= 0)
                 {
-                    return "尚未标记任何区域。在画布上拖拽出矩形框住水印 / 印章，可连续框选多处。";
+                    return Loc.T("Retouch_NoMarks");
                 }
 
                 int boundsWidth = (int)Math.Ceiling(_retouchBounds.Width);
@@ -257,7 +258,7 @@ namespace PSText.ViewModels
 
                 string message = string.Format(
                     CultureInfo.CurrentCulture,
-                    "已标记 {0} 处，共 {1} 像素；求解范围 {2} × {3} px。",
+                    Loc.T("Retouch_MarksSummary"),
                     _retouchRects.Count,
                     _retouchMaskPixels,
                     boundsWidth,
@@ -267,7 +268,7 @@ namespace PSText.ViewModels
                 {
                     message += string.Format(
                         CultureInfo.CurrentCulture,
-                        " 超出单次处理上限（{0} 万像素），请分批标记。",
+                        Loc.T("Retouch_TooManyPixels"),
                         InpaintFilter.MaxSolvePixels / 10000L);
                 }
 
@@ -319,8 +320,8 @@ namespace PSText.ViewModels
 
             IsRetouchMode = true;
             StatusMessage = _retouchTool == RetouchTool.CloneStamp
-                ? "仿制图章：按住 Alt 在画布上点一下取源，再拖拽涂抹"
-                : "智能填充：在画布上拖拽框住要去掉的水印 / 印章，然后点“智能填充”";
+                ? Loc.T("Retouch_CloneHint")
+                : Loc.T("Retouch_HealHintMarks");
         }
 
         private void ExitRetouch()
@@ -328,7 +329,7 @@ namespace PSText.ViewModels
             IsRetouchMode = false;
             CancelRetouchGesture();
             HideRetouchCursor();
-            StatusMessage = "已退出修补模式（标记已保留，可再次进入继续处理）";
+            StatusMessage = Loc.T("Retouch_Exited");
         }
 
         #endregion
@@ -533,7 +534,7 @@ namespace PSText.ViewModels
 
             StatusMessage = string.Format(
                 CultureInfo.CurrentCulture,
-                "已标记第 {0} 处（{1} × {2} px），可继续框选或直接点“智能填充”",
+                Loc.T("Retouch_MarkAdded"),
                 _retouchRects.Count,
                 right - left,
                 bottom - top);
@@ -543,7 +544,7 @@ namespace PSText.ViewModels
         private void ClearRetouchMask()
         {
             DiscardRetouchMask();
-            StatusMessage = "已清除标记";
+            StatusMessage = Loc.T("Retouch_MarksCleared");
         }
 
         private void DiscardRetouchMask()
@@ -612,7 +613,7 @@ namespace PSText.ViewModels
         private async System.Threading.Tasks.Task ApplyInpaintInternalAsync(byte[] mask, ImageDocument before)
         {
             // ApplyOneShotAsync 内部已 try/catch 全包并会弹窗，异常不会逃逸。
-            await ApplyOneShotAsync("智能填充", buffer => InpaintFilter.InpaintAsync(buffer, mask))
+            await ApplyOneShotAsync(Loc.T("Retouch_ApplyHeal"), buffer => InpaintFilter.InpaintAsync(buffer, mask))
                 .ConfigureAwait(true);
 
             // 只有真的提交成功（Document 被替换）才丢弃标记 —— 失败时保留标记，用户不必重画。
