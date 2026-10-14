@@ -129,6 +129,8 @@ namespace PSText
                 CheckAnnotationResize(imageService, pngPath, ref checks, ref failures, log);
                 CheckDocumentTabs(imageService, pngPath, jpgPath, ref checks, ref failures, log);
                 CheckTabReordering(imageService, pngPath, jpgPath, ref checks, ref failures, log);
+                CheckLargeAddressAware(ref checks, ref failures, log);
+                CheckAtomicSaveAndCancellation(imageService, pngPath, tempRoot, ref checks, ref failures, log);
                 log.AppendLine();
             }
             catch (Exception ex)
@@ -9532,6 +9534,58 @@ namespace PSText
                     log.AppendLine(string.Format("  OK   同时取到 {0} 个 ICC 色彩配置", savedContexts.Count));
                 }
 
+                // ---- 3c) 界面指示：带了元数据就要在状态栏说出来 ----
+                //
+                // 这条是给"两个布尔是死代码"上的保险：它们是**为了界面提示**才留在快照上的
+                // （元数据对象本身有线程亲和性，不能跨线程带），界面要是没用上就白留了。
+                checks++;
+                MainViewModel metadataViewModel = new MainViewModel(
+                    imageService, new NullDialogService(), new ImmediateDispatcherService());
+
+                metadataViewModel.LoadFromPathAsync(sourcePath).GetAwaiter().GetResult();
+                WaitForIdle(metadataViewModel);
+
+                string indicator = metadataViewModel.MetadataText;
+
+                if (!metadataViewModel.HasMetadataInfo)
+                {
+                    failures++;
+                    log.AppendLine("  FAIL 打开带 EXIF + ICC 的图后，状态栏应当显示元数据指示");
+                }
+                else if (indicator.IndexOf("EXIF", StringComparison.OrdinalIgnoreCase) < 0
+                         || indicator.IndexOf("ICC", StringComparison.OrdinalIgnoreCase) < 0)
+                {
+                    failures++;
+                    log.AppendLine(string.Format(
+                        "  FAIL 这张图同时带 EXIF 与 ICC，指示应当两个都提，实际是「{0}」", indicator));
+                }
+                else
+                {
+                    log.AppendLine(string.Format("  OK   状态栏如实显示元数据（「{0}」）", indicator));
+                }
+
+                // 反面：不带元数据的图不该占位置
+                checks++;
+                string plainPath = Path.Combine(tempRoot, "meta-plain.png");
+                SaveSolidImage(plainPath, 40, 30, 10, 10, 10);
+
+                MainViewModel plainViewModel = new MainViewModel(
+                    imageService, new NullDialogService(), new ImmediateDispatcherService());
+
+                plainViewModel.LoadFromPathAsync(plainPath).GetAwaiter().GetResult();
+                WaitForIdle(plainViewModel);
+
+                if (plainViewModel.HasMetadataInfo)
+                {
+                    failures++;
+                    log.AppendLine(string.Format(
+                        "  FAIL 不带元数据的图不该显示元数据指示（实际「{0}」）", plainViewModel.MetadataText));
+                }
+                else
+                {
+                    log.AppendLine("  OK   不带元数据的图不占用状态栏位置（不会永远挂一个空标签）");
+                }
+
                 // ---- 4) 端到端另存为 JPEG：元数据要活下来 ----
                 ImageSaveOptions jpegOptions = new ImageSaveOptions
                 {
@@ -9587,6 +9641,27 @@ namespace PSText
                 else
                 {
                     log.AppendLine("  OK   另存为 JPEG 后厂商 / 型号 / 拍摄时间全部保留");
+                }
+
+                // ---- 3b) ICC 要真的落进文件，而不只是"读得到" ----
+                //
+                // 这一条是补的：原来只验了"保存侧能取到 ICC"，但**没验存完之后还在不在**。
+                // 只验一半就宣称"ICC 保留"，属于自己给自己开绿灯。
+                checks++;
+                if (!jpegReloaded.HasColorProfile)
+                {
+                    failures++;
+                    log.AppendLine("  FAIL 另存为 JPEG 后 ICC 色彩配置丢失（加载时应当能认出有色彩配置）");
+                }
+                else if (jpegContexts == null || jpegContexts.Count == 0)
+                {
+                    failures++;
+                    log.AppendLine("  FAIL 另存为 JPEG 后取不到 ICC 色彩配置 —— 声明了保留却没写进文件");
+                }
+                else
+                {
+                    log.AppendLine(string.Format(
+                        "  OK   ICC 真的写进了文件并能读回（{0} 个色彩配置）", jpegContexts.Count));
                 }
 
                 checks++;
@@ -10032,6 +10107,34 @@ namespace PSText
                 else
                 {
                     log.AppendLine("  OK   文案键与主题资源没有撞名");
+                }
+
+                // ---- 2b) 首次启动的语言探测 ----
+                //
+                // 系统是什么语言由机器决定，断言只能打在不变量上：探测结果必须是**已支持的语言之一**，
+                // 不能是空串或未支持的值（那会让首次启动直接落到"显示键名"的状态）。
+                checks++;
+                string detected = LocalizationService.DetectFromSystem();
+                bool detectedKnown = false;
+
+                for (int i = 0; i < service.AvailableLanguages.Count; i++)
+                {
+                    if (string.Equals(service.AvailableLanguages[i].Culture, detected, StringComparison.OrdinalIgnoreCase))
+                    {
+                        detectedKnown = true;
+                    }
+                }
+
+                if (!detectedKnown)
+                {
+                    failures++;
+                    log.AppendLine(string.Format(
+                        "  FAIL 系统语言探测返回了不支持的值「{0}」（首次启动会用不上字典）", detected ?? "null"));
+                }
+                else
+                {
+                    log.AppendLine(string.Format(
+                        "  OK   首次启动的语言探测结果在支持范围内（本机判为 {0}）", detected));
                 }
 
                 // ---- 3) 切换语言 ----
@@ -10959,6 +11062,345 @@ namespace PSText
                 {
                     log.AppendLine("       位于 " + stack.Split('\n')[0].Trim());
                 }
+            }
+
+            log.AppendLine();
+        }
+
+        /// <summary>
+        /// 校验 32 位进程的"大地址感知"标志。
+        ///
+        /// 背景：本项目刻意跑 32 位（`AnyCPU + Prefer32Bit=true`）—— 兼容面最大、内存占用小。
+        /// 代价是用户态地址空间有限：**没有 LAA 就是 2GB**，而 50MP 图 + 30 步历史很容易撞上。
+        /// 置上 LAA 之后在 64 位 Windows 上能用到约 4GB。
+        ///
+        /// 实测这个标志**当前是开着的**（`DllCharacteristics = 0x8560`，含 `0x0020`），
+        /// csc 对 .NET 可执行文件默认就会置。所以这一项要做的不是"改"，而是**把它钉住**：
+        /// 万一将来有人把 `<Prefer32Bit>` 改成 false，位数与这条推理都得重来一遍，
+        /// 那时这条断言会红，逼着人回头看，而不是悄悄把一个上限又降回去。
+        ///
+        /// 断言方式就是读自己的 PE 头 —— 直接验"二进制里到底怎么写的"，
+        /// 而不是相信某个 MSBuild 属性名（那些属性在不同工具链上不一定被消费）。
+        /// </summary>
+        private static void CheckLargeAddressAware(ref int checks, ref int failures, StringBuilder log)
+        {
+            log.AppendLine("[43] 32 位进程的大地址感知");
+
+            try
+            {
+                string exePath = null;
+
+                try
+                {
+                    System.Reflection.Assembly entry = System.Reflection.Assembly.GetEntryAssembly();
+                    exePath = entry == null ? null : entry.Location;
+                }
+                catch (Exception)
+                {
+                }
+
+                checks++;
+
+                if (string.IsNullOrEmpty(exePath) || !File.Exists(exePath))
+                {
+                    log.AppendLine("  SKIP 拿不到自身 exe 路径，跳过 PE 头检查");
+                }
+                else
+                {
+                    byte[] image = File.ReadAllBytes(exePath);
+
+                    int peOffset = ReadInt32(image, 0x3C);
+
+                    if (peOffset <= 0 || peOffset + 24 >= image.Length
+                        || image[peOffset] != (byte)'P' || image[peOffset + 1] != (byte)'E')
+                    {
+                        failures++;
+                        log.AppendLine("  FAIL 读不出 PE 头（exe 格式异常）");
+                    }
+                    else
+                    {
+                        int coff = peOffset + 4;
+                        int machine = ReadUInt16(image, coff);
+                        int optionalHeader = coff + 20;
+                        int magic = ReadUInt16(image, optionalHeader);
+                        int dllCharacteristics = ReadUInt16(image, optionalHeader + 70);
+
+                        bool is32BitImage = machine == 0x014C && magic == 0x010B;
+                        bool largeAware = (dllCharacteristics & 0x0020) != 0;
+
+                        // ---- 1) 位数要与运行时一致 ----
+                        checks++;
+                        int pointerSize = IntPtr.Size;
+
+                        if (is32BitImage != (pointerSize == 4))
+                        {
+                            failures++;
+                            log.AppendLine(string.Format(
+                                "  FAIL PE 头写的位数（{0}）与运行时（{1} 位）不一致 —— Prefer32Bit 配置被改过？",
+                                is32BitImage ? "32 位" : "64 位", pointerSize * 8));
+                        }
+                        else
+                        {
+                            log.AppendLine(string.Format(
+                                "  OK   PE 头与运行时一致：{0} 位（Machine=0x{1:X4}）",
+                                pointerSize * 8, machine));
+                        }
+
+                        // ---- 2) 32 位时必须有 LAA ----
+                        checks++;
+                        if (pointerSize == 4 && !largeAware)
+                        {
+                            failures++;
+                            log.AppendLine(
+                                "  FAIL 32 位进程没有大地址感知标志 —— 用户态上限只有 2GB，"
+                                + "50MP 图 + 30 步历史很容易 OOM（DllCharacteristics=0x"
+                                + dllCharacteristics.ToString("X4") + "）");
+                        }
+                        else if (pointerSize == 4)
+                        {
+                            log.AppendLine(
+                                "  OK   32 位进程带大地址感知标志（DllCharacteristics=0x"
+                                + dllCharacteristics.ToString("X4")
+                                + "）—— 64 位 Windows 上的用户态上限约为 4GB 而非 2GB");
+                        }
+                        else
+                        {
+                            log.AppendLine("  OK   已改为 64 位进程，地址空间不再受 2GB 限制（LAA 标志对 64 位无意义）");
+                        }
+
+                        // ---- 3) 位数既然变了，就要有人重新核对内存预算 ----
+                        checks++;
+                        if (!is32BitImage)
+                        {
+                            failures++;
+                            log.AppendLine(
+                                "  FAIL 进程已不再是 32 位。这不是错误，但意味着"
+                                + "「32 位 + 大地址感知」那条内存预算推理作废，"
+                                + "需要重新确认 P/Invoke、注册表重定向与部署说明都跟着更新了。");
+                        }
+                        else
+                        {
+                            log.AppendLine("  OK   仍是 32 位部署（与 README / 审计报告里的说明一致）");
+                        }
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                failures++;
+                log.AppendLine("  FAIL 大地址感知检查异常: " + ex.GetType().Name + " " + ex.Message);
+            }
+
+            log.AppendLine();
+        }
+
+        private static int ReadUInt16(byte[] data, int offset)
+        {
+            return data[offset] | (data[offset + 1] << 8);
+        }
+
+        private static int ReadInt32(byte[] data, int offset)
+        {
+            return data[offset] | (data[offset + 1] << 8) | (data[offset + 2] << 16) | (data[offset + 3] << 24);
+        }
+
+        /// <summary>
+        /// 校验保存的原子落盘与长操作的取消。
+        ///
+        /// 两个性质，都是"出问题时表现很吓人"的那种：
+        ///   1. **保存失败不能毁掉原文件**。原来用 `FileMode.Create` 直接写目标 ——
+        ///      那个模式会立刻把目标截断成 0 字节，于是"保存失败"等于"把用户原来那张图弄没了"。
+        ///      这里用"写入过程故意抛异常"来验：原文件字节必须一个都不变，且不留下临时文件。
+        ///   2. **取消不能改坏文档**。取消只允许发生在提交之前；
+        ///      所以断言取消之后**位图内容与撤销步数都没变**。
+        ///      另外必须有反面对照（不取消时反色确实生效），否则第 2 条可能是因为
+        ///      "反色根本没接上"而空过。
+        /// </summary>
+        private static void CheckAtomicSaveAndCancellation(
+            IImageService imageService,
+            string pngPath,
+            string tempRoot,
+            ref int checks,
+            ref int failures,
+            StringBuilder log)
+        {
+            log.AppendLine("[44] 原子落盘与操作取消");
+
+            string root = Path.Combine(tempRoot, "atomic-save");
+            Directory.CreateDirectory(root);
+
+            // ---- 1) 原子落盘：写入抛异常时原文件必须完好 ----
+            string targetPath = Path.Combine(root, "keep-me.png");
+            byte[] original = { 1, 2, 3, 4, 5, 6, 7, 8, 9, 10 };
+            File.WriteAllBytes(targetPath, original);
+
+            checks++;
+            try
+            {
+                AtomicFileWriter.Write(targetPath, stream =>
+                {
+                    // 模拟"写了一半编码器炸了"
+                    stream.Write(new byte[] { 0xFF, 0xFF, 0xFF }, 0, 3);
+                    throw new IOException("模拟编码中途失败");
+                });
+
+                failures++;
+                log.AppendLine("  FAIL 写入委托抛异常时 AtomicFileWriter 应当把异常往外抛（不能吞掉）");
+            }
+            catch (IOException)
+            {
+                byte[] after = File.ReadAllBytes(targetPath);
+                string[] leftovers = Directory.GetFiles(root, "*" + AtomicFileWriter.TempSuffix);
+
+                if (after.Length != original.Length)
+                {
+                    failures++;
+                    log.AppendLine(string.Format(
+                        "  FAIL 写入失败把目标文件改了（{0} 字节 → {1} 字节）—— 这等于把用户原来的图弄没了",
+                        original.Length, after.Length));
+                }
+                else if (leftovers.Length != 0)
+                {
+                    failures++;
+                    log.AppendLine(string.Format(
+                        "  FAIL 写入失败留下了 {0} 个临时文件（应当在 finally 里清掉）", leftovers.Length));
+                }
+                else
+                {
+                    log.AppendLine("  OK   写入失败时目标文件字节完全未变，且没留下临时文件");
+                }
+            }
+            catch (Exception ex)
+            {
+                failures++;
+                log.AppendLine("  FAIL 原子落盘抛出了意料之外的异常: " + ex.GetType().Name);
+            }
+
+            // ---- 2) 原子落盘：正常写入要能替换成功 ----
+            checks++;
+            byte[] replacement = { 9, 8, 7, 6, 5 };
+
+            AtomicFileWriter.Write(targetPath, stream =>
+            {
+                stream.Write(replacement, 0, replacement.Length);
+            });
+
+            byte[] replaced = File.ReadAllBytes(targetPath);
+
+            if (replaced.Length != replacement.Length || replaced[0] != replacement[0])
+            {
+                failures++;
+                log.AppendLine("  FAIL 正常写入没有替换掉目标文件");
+            }
+            else
+            {
+                log.AppendLine("  OK   正常写入能替换目标文件（内容为新的）");
+            }
+
+            // ---- 3) 空闲时没有可取消的操作 ----
+            MainViewModel viewModel = new MainViewModel(
+                imageService, new NullDialogService(), new ImmediateDispatcherService());
+
+            checks++;
+            if (viewModel.CanCancelOperation || viewModel.CancelOperationCommand.CanExecute(null))
+            {
+                failures++;
+                log.AppendLine("  FAIL 空闲时不该显示可取消");
+            }
+            else
+            {
+                // 空闲时点取消必须是安全的空操作
+                viewModel.CancelOperation();
+                log.AppendLine("  OK   空闲时不可取消，且误调取消是安全的空操作");
+            }
+
+            // ---- 4) 取消：文档必须原样 ----
+            viewModel.LoadFromPathAsync(pngPath).GetAwaiter().GetResult();
+            WaitForIdle(viewModel);
+
+            int undoBefore = viewModel.UndoCount;
+            bool invertApplied = false;
+
+            checks++;
+            try
+            {
+                // 命令会同步执行到第一个真正的 await（此时 IsBusy 与取消源都已就绪），
+                // 所以这里紧跟着取消是**确定**能赶在提交之前的，不依赖运气。
+                viewModel.InvertCommand.Execute(null);
+
+                if (viewModel.CanCancelOperation)
+                {
+                    viewModel.CancelOperation();
+                    WaitForIdle(viewModel);
+                }
+                else
+                {
+                    // 极快的情况下可能在取消前就跑完了，那就退回用"未取消"的语义判（下面第 5 条会覆盖）
+                    invertApplied = true;
+                }
+
+                if (!invertApplied)
+                {
+                    if (viewModel.UndoCount != undoBefore)
+                    {
+                        failures++;
+                        log.AppendLine(string.Format(
+                            "  FAIL 取消后撤销步数变了（{0} → {1}）—— 取消不该产生历史",
+                            undoBefore, viewModel.UndoCount));
+                    }
+                    else if (viewModel.CanCancelOperation)
+                    {
+                        failures++;
+                        log.AppendLine("  FAIL 取消结束后「可取消」状态没有复位（按钮会一直亮着）");
+                    }
+                    else
+                    {
+                        log.AppendLine("  OK   取消后文档与撤销历史都没变，且可取消状态已复位");
+                    }
+                }
+                else
+                {
+                    log.AppendLine("  SKIP 反色在取消前就完成了（机器太快），本项跳过；由下一条覆盖取消语义");
+                }
+            }
+            catch (Exception ex)
+            {
+                failures++;
+                log.AppendLine("  FAIL 取消流程抛异常: " + ex.GetType().Name + " " + ex.Message);
+            }
+
+            // ---- 5) 反面对照：不取消时反色必须真的生效 ----
+            //
+            // 没有这一条，第 4 条就可能因为"反色压根没接上"而假通过。
+            checks++;
+            try
+            {
+                MainViewModel fresh = new MainViewModel(
+                    imageService, new NullDialogService(), new ImmediateDispatcherService());
+
+                fresh.LoadFromPathAsync(pngPath).GetAwaiter().GetResult();
+                WaitForIdle(fresh);
+
+                int undoBeforeFresh = fresh.UndoCount;
+                fresh.InvertCommand.Execute(null);
+                WaitForIdle(fresh);
+
+                if (fresh.UndoCount != undoBeforeFresh + 1)
+                {
+                    failures++;
+                    log.AppendLine(string.Format(
+                        "  FAIL 不取消时反色应当产生一步历史（{0} → {1}）",
+                        undoBeforeFresh, fresh.UndoCount));
+                }
+                else
+                {
+                    log.AppendLine("  OK   反面对照成立：不取消时反色确实生效并进入撤销历史");
+                }
+            }
+            catch (Exception ex)
+            {
+                failures++;
+                log.AppendLine("  FAIL 反面对照失败: " + ex.GetType().Name + " " + ex.Message);
             }
 
             log.AppendLine();

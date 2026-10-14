@@ -25,7 +25,7 @@
 - WPF + .NET Framework 4.8，`AnyCPU + Prefer32Bit=true`（32 位运行）。
 - **零第三方 NuGet**——引入任何依赖前必须先向用户确认。
 - 构建产物在 `build/bin`（`Directory.Build.props` 定制），`.csproj` 为传统显式包含（**新文件必须手工加 `<Compile Include>`**）。
-- 自检在 `SelfTest.cs`（约 12,800 行 / **366 断言**），`PSText.exe --selftest` 运行。
+- 自检在 `SelfTest.cs`（约 13,400 行 / **379 断言**），`PSText.exe --selftest` 运行。
   ⚠️ 其中**文件关联的写入流程约 18 项在本机是 Skip 的**（本机工具层拦下可执行文件写注册表，
   已核实非代码问题）。自检先探测 HKCU 可写性，不可写就明确 Skip，避免恒红。
 - MVVM：VM 只依赖 `IImageService / IDialogService / IDispatcherService / IPrintService`，**不得引用 WPF 控件类型**。
@@ -233,3 +233,18 @@
   因此移动后标记跟着对象走、无需刷新。
 - 插入指示线用 `Adorner`（不往可视树塞矩形）；坐标用 `TranslatePoint` 折到标签栏坐标系，横向滚动自动算对。
 - 写自检时留过一条 `ReferenceEquals(x, x)` 恒真断言，已删。**空断言比没有断言更糟**。
+
+## 遗留补齐 · 取消 · 原子落盘（2026-10-14 完成）
+- **保存必须原子落盘**（`Services/Imaging/AtomicFileWriter.cs`）：`FileMode.Create` 会
+  **立刻把目标截断成 0 字节**，于是"保存失败"= "把用户原来那张图弄没了"。
+  改为先写临时文件再 `File.Replace`（不支持时退回删旧 + 改名）。
+  验证手法：让写入委托故意抛异常，断言"原文件字节不变 + 不留临时文件"。
+- **滤镜/缩放的取消本来就是通的**：`PixelParallel` 早就有并行选项里的取消令牌并逐块检查，
+  8 个滤镜方法也都有令牌形参。这活儿的本质是"把 `CancellationToken.None` 换成真令牌"。
+- **取消的断言要有反面对照**：只断言"取消后文档没变"可能因"操作根本没接上"而空过；
+  必须同时断言"不取消时确实生效"。
+- **i18n 首启不能硬编码语言**：`LocalizationService.DetectFromSystem()` —— 只在系统是英文时给英文。
+- **别留死代码**：`HasSourceMetadata` / `HasColorProfile` 曾只是"备着给界面用"而从没接上，
+  已接到状态栏指示 + tooltip。断言要打正反两面（有元数据要显示、没有就不占位）。
+- **32 位大地址感知已满足**：`DllCharacteristics = 0x8560` 已含该标志（编译器默认置）。
+  自检 [43] 读自身 PE 头把"32 位 + LAA"钉住，改 `Prefer32Bit` 会立刻变红。

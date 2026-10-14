@@ -613,7 +613,7 @@ namespace PSText.ViewModels
         private async System.Threading.Tasks.Task ApplyInpaintInternalAsync(byte[] mask, ImageDocument before)
         {
             // ApplyOneShotAsync 内部已 try/catch 全包并会弹窗，异常不会逃逸。
-            await ApplyOneShotAsync(Loc.T("Retouch_ApplyHeal"), buffer => InpaintFilter.InpaintAsync(buffer, mask))
+            await ApplyOneShotAsync(Loc.T("Retouch_ApplyHeal"), (buffer, token) => InpaintFilter.InpaintAsync(buffer, mask, token))
                 .ConfigureAwait(true);
 
             // 只有真的提交成功（Document 被替换）才丢弃标记 —— 失败时保留标记，用户不必重画。

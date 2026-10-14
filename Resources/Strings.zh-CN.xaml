@@ -694,4 +694,12 @@
   <sys:String x:Key="Batch_PushedToShared">已把这张图的参数应用为公共设置</sys:String>
   <sys:String x:Key="Batch_PushToSharedConfirm">用这张图的参数覆盖当前公共设置？其余未单独设置的图片都会跟着变。</sys:String>
   <sys:String x:Key="Tab_Moved">标签顺序已调整：{0}</sys:String>
+  <sys:String x:Key="Meta_Label">元数据</sys:String>
+  <sys:String x:Key="Meta_IndicatorExif">EXIF</sys:String>
+  <sys:String x:Key="Meta_IndicatorIcc">ICC</sys:String>
+  <sys:String x:Key="Meta_ToolTip">源文件带 EXIF / ICC，保存时会保留拍摄信息与色彩配置。缩略图会丢弃、方向标记归零；另存为其他格式时不保留（EXIF 无法跨格式沿用）。</sys:String>
+  <sys:String x:Key="Status_Cancelling">正在取消…</sys:String>
+  <sys:String x:Key="Status_SaveCanceled">已取消保存（目标文件未被改动）</sys:String>
+  <sys:String x:Key="Common_CancelOperation">取消</sys:String>
+  <sys:String x:Key="Tip_CancelOperation">中止当前操作。取消发生在提交之前，文档与撤销历史都不会被改动。</sys:String>
 </ResourceDictionary>

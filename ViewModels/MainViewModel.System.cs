@@ -1,4 +1,5 @@
 using System;
+using System.Threading;
 using System.Diagnostics;
 using System.Globalization;
 using System.IO;
@@ -105,6 +106,10 @@ namespace PSText.ViewModels
             ShowRuntimeInfoCommand = new RelayCommand(ShowRuntimeInfo);
 
             OpenLogFolderCommand = new RelayCommand(OpenLogFolder);
+
+            CancelOperationCommand = new RelayCommand(
+                CancelOperation,
+                () => CanCancelOperation);
         }
 
         #endregion
@@ -234,6 +239,105 @@ namespace PSText.ViewModels
             {
                 HandleError(Loc.T("Assoc_OpenFailed"), ex, true);
             }
+        }
+
+        #endregion
+
+        #region 可取消的长操作
+
+        /// <summary>
+        /// 当前长操作的取消源。
+        ///
+        /// 只保一个：加载 / 应用滤镜 / 保存这些操作在界面上本来就是互斥的（`IsBusy` 挡着），
+        /// 同时存在两个只会让"取消到底取消了谁"变得说不清楚。
+        /// </summary>
+        private CancellationTokenSource _operationCts;
+
+        /// <summary>取消当前长操作。界面在操作进行中显示「取消」按钮。</summary>
+        public ICommand CancelOperationCommand { get; private set; }
+
+        /// <summary>当前是否有可取消的操作在跑（界面据此显示取消按钮）。</summary>
+        public bool CanCancelOperation
+        {
+            get
+            {
+                CancellationTokenSource cts = _operationCts;
+                return cts != null && !cts.IsCancellationRequested;
+            }
+        }
+
+        /// <summary>
+        /// 开始一个可取消的长操作，返回它的令牌。
+        ///
+        /// 调用方**必须**在同一条路径的 finally 里调 <see cref="EndCancellableOperation"/>，
+        /// 否则取消按钮会一直亮着。用 try/finally 而不是让调用方记着，是因为漏掉的表现
+        /// 是"按钮永远可点、点了没反应"，那种问题很难被发现。
+        /// </summary>
+        private CancellationToken BeginCancellableOperation()
+        {
+            CancelOperation();
+            DisposeOperationCts();
+
+            _operationCts = new CancellationTokenSource();
+            RaiseCancelState();
+
+            return _operationCts.Token;
+        }
+
+        /// <summary>结束当前长操作（正常结束或被取消）。</summary>
+        private void EndCancellableOperation()
+        {
+            DisposeOperationCts();
+            RaiseCancelState();
+        }
+
+        /// <summary>请求取消当前长操作（不等待它结束）。</summary>
+        public void CancelOperation()
+        {
+            CancellationTokenSource cts = _operationCts;
+
+            if (cts == null || cts.IsCancellationRequested)
+            {
+                return;
+            }
+
+            try
+            {
+                cts.Cancel();
+            }
+            catch (ObjectDisposedException)
+            {
+                // 操作刚好结束并释放了 —— 竞态下这是正常情况，忽略即可。
+            }
+
+            StatusMessage = Loc.T("Status_Cancelling");
+            RaiseCancelState();
+        }
+
+        private void DisposeOperationCts()
+        {
+            CancellationTokenSource cts = _operationCts;
+
+            if (cts == null)
+            {
+                return;
+            }
+
+            _operationCts = null;
+
+            try
+            {
+                cts.Dispose();
+            }
+            catch (Exception)
+            {
+            }
+        }
+
+        private void RaiseCancelState()
+        {
+            OnPropertyChanged("CanCancelOperation");
+            RelayCommand.RaiseCanExecuteChanged();
         }
 
         #endregion

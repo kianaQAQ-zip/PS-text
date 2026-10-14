@@ -668,17 +668,15 @@ namespace PSText.Services
 
             ApplyEncoderOptions(encoder, options);
 
-            string directory = Path.GetDirectoryName(filePath);
-            if (!string.IsNullOrEmpty(directory) && !Directory.Exists(directory))
-            {
-                Directory.CreateDirectory(directory);
-            }
-
-            using (FileStream stream = new FileStream(filePath, FileMode.Create, FileAccess.Write, FileShare.None))
+            // 原子落盘：先写临时文件，成功后整体替换。
+            //
+            // 原来这里是 `FileMode.Create` 直接写目标文件 —— 那个模式会**立刻把目标截断成 0 字节**，
+            // 于是"保存失败"就变成了"把用户原来那张图弄没了"。
+            // 改成原子替换之后，最坏情况只留下一个临时文件，目标文件保持完好。
+            AtomicFileWriter.Write(filePath, stream =>
             {
                 encoder.Save(stream);
-                stream.Flush();
-            }
+            });
         }
 
         /// <summary>安全读取元数据的格式名（读不到就返回"未知"）。</summary>

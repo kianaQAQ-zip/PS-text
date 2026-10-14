@@ -63,9 +63,13 @@ namespace PSText
             // 语言：先从设置里恢复，再挂上字典。
             // 必须在创建主窗口之前 —— 窗口里的 {DynamicResource Xxx} 在加载时就要能取到值，
             // 晚一步的话界面会先闪一下键名再变成文字。
+            // 优先级：用户选过的语言 > 系统界面语言 > 默认。
+            // 原来这里读不到设置就硬编码回中文，英文 Windows 用户第一次打开会看到中文界面 —— 那是我自己写的默认值，属于缺陷。
             string savedLanguage = _settingsService.Load().LanguageCulture;
             LocalizationService.Instance.SetLanguage(
-                string.IsNullOrWhiteSpace(savedLanguage) ? LocalizationService.DefaultCulture : savedLanguage);
+                string.IsNullOrWhiteSpace(savedLanguage)
+                    ? LocalizationService.DetectFromSystem()
+                    : savedLanguage);
             LocalizationService.Instance.ApplyResources(this);
             viewModel.FileAssociationService = new FileAssociationService();
             viewModel.RuntimeInfo = DotNetRuntimeProbe.Probe();

@@ -299,6 +299,7 @@ namespace PSText.ViewModels
 
             // 多文档标签页命令（见 MainViewModel.Tabs.cs）
             InitializeTabCommands();
+            InitializeSystemCommands();
 
             _previewTimer = new DispatcherTimer(DispatcherPriority.Background)
             {
@@ -384,6 +385,9 @@ namespace PSText.ViewModels
             OnPropertyChanged("FileSizeText");
             OnPropertyChanged("FileName");
             OnPropertyChanged("FormatText");
+            OnPropertyChanged("MetadataText");
+            OnPropertyChanged("HasMetadataInfo");
+            OnPropertyChanged("MetadataToolTip");
             OnPropertyChanged("StatusText");
             OnPropertyChanged("WindowTitle");
 
@@ -460,6 +464,51 @@ namespace PSText.ViewModels
 
                 return ImageFileFormatHelper.GetDisplayName(_document.Format);
             }
+        }
+
+        /// <summary>
+        /// 元数据指示（"EXIF" / "ICC" / "EXIF + ICC"）；没有元数据时为空串，界面据此隐藏。
+        ///
+        /// 这两个布尔本来就是"供界面提示"才留在快照上的（元数据对象本身有线程亲和性，
+        /// 不能跟着快照跨线程走），但一直没接上界面 —— 那就是死代码。
+        /// 这里补上，顺带把"保存时会保留什么、不保留什么"写进提示。
+        /// </summary>
+        public string MetadataText
+        {
+            get
+            {
+                if (_document == null)
+                {
+                    return string.Empty;
+                }
+
+                bool exif = _document.HasSourceMetadata;
+                bool icc = _document.HasColorProfile;
+
+                if (exif && icc)
+                {
+                    return Loc.T("Meta_IndicatorExif") + " + " + Loc.T("Meta_IndicatorIcc");
+                }
+
+                if (exif)
+                {
+                    return Loc.T("Meta_IndicatorExif");
+                }
+
+                return icc ? Loc.T("Meta_IndicatorIcc") : string.Empty;
+            }
+        }
+
+        /// <summary>是否给"元数据"留位置（没有元数据时不占状态栏）。</summary>
+        public bool HasMetadataInfo
+        {
+            get { return !string.IsNullOrEmpty(MetadataText); }
+        }
+
+        /// <summary>元数据提示（说明保存时到底保留了什么）。</summary>
+        public string MetadataToolTip
+        {
+            get { return Loc.T("Meta_ToolTip"); }
         }
 
         /// <summary>窗口标题（含未保存标记）。</summary>
@@ -1039,9 +1088,22 @@ namespace PSText.ViewModels
                     MetadataSourcePath = snapshot.FilePath
                 };
 
-                long written = await _imageService
-                    .SaveAsync(snapshot.Bitmap, filePath, options, CancellationToken.None)
-                    .ConfigureAwait(true);
+                // 大图编码要几秒到十几秒，期间要能取消。
+                // 取消只会在**开始编码之前**生效（编码器本身不接受令牌），
+                // 所以真正的保障落在 Service 侧的原子落盘上：无论中途出什么事，目标文件都不会被写坏。
+                CancellationToken saveToken = BeginCancellableOperation();
+                long written;
+
+                try
+                {
+                    written = await _imageService
+                        .SaveAsync(snapshot.Bitmap, filePath, options, saveToken)
+                        .ConfigureAwait(true);
+                }
+                finally
+                {
+                    EndCancellableOperation();
+                }
 
                 // 目标路径变化时，文档需要同步新的路径与格式。
                 if (isNewPath)
@@ -1077,6 +1139,10 @@ namespace PSText.ViewModels
             catch (IOException ex)
             {
                 HandleError(Loc.T("Error_WriteFailed"), ex, true);
+            }
+            catch (OperationCanceledException)
+            {
+                StatusMessage = Loc.T("Status_SaveCanceled");
             }
             catch (Exception ex)
             {

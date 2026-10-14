@@ -1,4 +1,5 @@
 using System;
+using System.Threading;
 using System.Threading.Tasks;
 using System.Windows.Input;
 using System.Windows.Media;
@@ -253,61 +254,63 @@ namespace PSText.ViewModels
         {
             InvertCommand = CreateFilterCommand(
                 Loc.T("Filter_Invert"),
-                () => buffer => _basicFilters.InvertAsync(buffer),
+                () => (buffer, token) => _basicFilters.InvertAsync(buffer, token),
                 () => HasDocument);
 
             GrayscaleCommand = CreateFilterCommand(
                 Loc.T("Filter_Grayscale"),
-                () => buffer => _basicFilters.GrayscaleAsync(buffer),
+                () => (buffer, token) => _basicFilters.GrayscaleAsync(buffer, token),
                 () => HasDocument);
 
             ThresholdCommand = CreateFilterCommand(
                 Loc.T("Filter_Threshold"),
-                () => buffer => _basicFilters.ThresholdAsync(buffer, _threshold),
+                () => (buffer, token) => _basicFilters.ThresholdAsync(buffer, _threshold, token),
                 () => HasDocument);
 
             BlurCommand = CreateFilterCommand(
                 Loc.T("Filter_GaussianBlur"),
-                () => buffer => _blurFilters.GaussianBlurAsync(buffer, _blurRadius),
+                () => (buffer, token) => _blurFilters.GaussianBlurAsync(buffer, _blurRadius, token),
                 () => HasDocument);
 
             SharpenCommand = CreateFilterCommand(
                 Loc.T("Filter_UnsharpMask"),
-                () => buffer => _blurFilters.UnsharpMaskAsync(
+                () => (buffer, token) => _blurFilters.UnsharpMaskAsync(
                     buffer,
                     _sharpenRadius,
                     _sharpenAmount,
-                    _sharpenThreshold),
+                    _sharpenThreshold,
+                    token),
                 () => HasDocument);
 
             RotateClockwiseCommand = CreateGeometryCommand(
                 Loc.T("Filter_RotateCw90"),
-                buffer => _geometryFilters.RotateAsync(buffer, RotationAngle.Clockwise90));
+                (buffer, token) => _geometryFilters.RotateAsync(buffer, RotationAngle.Clockwise90, token));
 
             RotateCounterClockwiseCommand = CreateGeometryCommand(
                 Loc.T("Filter_RotateCcw90"),
-                buffer => _geometryFilters.RotateAsync(buffer, RotationAngle.Clockwise270));
+                (buffer, token) => _geometryFilters.RotateAsync(buffer, RotationAngle.Clockwise270, token));
 
             Rotate180Command = CreateGeometryCommand(
                 Loc.T("Batch_Rotate180"),
-                buffer => _geometryFilters.RotateAsync(buffer, RotationAngle.Clockwise180));
+                (buffer, token) => _geometryFilters.RotateAsync(buffer, RotationAngle.Clockwise180, token));
 
             FlipHorizontalCommand = CreateGeometryCommand(
                 Loc.T("Geometry_FlipHorizontal"),
-                buffer => _geometryFilters.FlipHorizontalAsync(buffer));
+                (buffer, token) => _geometryFilters.FlipHorizontalAsync(buffer, token));
 
             FlipVerticalCommand = CreateGeometryCommand(
                 Loc.T("Geometry_FlipVertical"),
-                buffer => _geometryFilters.FlipVerticalAsync(buffer));
+                (buffer, token) => _geometryFilters.FlipVerticalAsync(buffer, token));
 
             ApplyBorderCommand = CreateFilterCommand(
                 Loc.T("Border_Apply"),
-                () => buffer => _borderFilters.ApplyAsync(
+                () => (buffer, token) => _borderFilters.ApplyAsync(
                     buffer,
                     _borderStyle,
                     _borderWidth,
                     _borderColor,
-                    Color.FromArgb(150, 0, 0, 0)),
+                    Color.FromArgb(150, 0, 0, 0),
+                    token),
                 () => HasDocument);
 
             // 裁剪：进入 / 取消 / 应用
@@ -365,7 +368,7 @@ namespace PSText.ViewModels
 
                 await ApplyOneShotAsync(
                     Loc.T("Text_Apply"),
-                    buffer => _textOverlayFilter.ApplyAsync(buffer, options, dpiX, dpiY)).ConfigureAwait(true);
+                    (buffer, token) => _textOverlayFilter.ApplyAsync(buffer, options, dpiX, dpiY, token)).ConfigureAwait(true);
             }
             catch (Exception ex)
             {
@@ -375,7 +378,7 @@ namespace PSText.ViewModels
 
         private ICommand CreateFilterCommand(
             string label,
-            Func<Func<PixelBuffer, Task<PixelBuffer>>> factory,
+            Func<Func<PixelBuffer, CancellationToken, Task<PixelBuffer>>> factory,
             Func<bool> canExecute)
         {
             return new RelayCommand(
@@ -385,7 +388,7 @@ namespace PSText.ViewModels
 
         private ICommand CreateGeometryCommand(
             string label,
-            Func<PixelBuffer, Task<PixelBuffer>> transform)
+            Func<PixelBuffer, CancellationToken, Task<PixelBuffer>> transform)
         {
             return new RelayCommand(
                 () => RunFilterAsync(label, transform),
@@ -407,7 +410,7 @@ namespace PSText.ViewModels
         /// 执行一次性滤镜。这是由 UI 命令触发的“即发即忘”流程，
         /// 内部已由 ApplyOneShotAsync 用 try/catch 全包，异常不会逃逸到 UI 线程。
         /// </summary>
-        private void RunFilterAsync(string label, Func<PixelBuffer, Task<PixelBuffer>> transform)
+        private void RunFilterAsync(string label, Func<PixelBuffer, CancellationToken, Task<PixelBuffer>> transform)
         {
             if (transform == null)
             {
@@ -417,7 +420,7 @@ namespace PSText.ViewModels
             _pendingOperation = RunFilterInternalAsync(label, transform);
         }
 
-        private async Task RunFilterInternalAsync(string label, Func<PixelBuffer, Task<PixelBuffer>> transform)
+        private async Task RunFilterInternalAsync(string label, Func<PixelBuffer, CancellationToken, Task<PixelBuffer>> transform)
         {
             await ApplyOneShotAsync(label, transform).ConfigureAwait(true);
         }

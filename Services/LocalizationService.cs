@@ -158,6 +158,31 @@ namespace PSText.Services
             return key;
         }
 
+        /// <summary>
+        /// 按系统界面语言挑一个初始语言（**只在用户还没选过语言时**用）。
+        ///
+        /// 只在系统是英文时给英文，其余语言一律给中文：这是个面向中文办公场景的工具，
+        /// 给一个法语系统的用户装一个半英文界面，不如给他中文 ——
+        /// 至少文档、教程、同事用的都是中文。
+        /// </summary>
+        public static string DetectFromSystem()
+        {
+            try
+            {
+                CultureInfo ui = CultureInfo.CurrentUICulture;
+
+                if (ui != null && string.Equals(ui.TwoLetterISOLanguageName, "en", StringComparison.OrdinalIgnoreCase))
+                {
+                    return "en-US";
+                }
+            }
+            catch (Exception)
+            {
+            }
+
+            return DefaultCulture;
+        }
+
         public void SetLanguage(string culture)
         {
             if (string.IsNullOrWhiteSpace(culture))

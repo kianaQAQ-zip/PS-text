@@ -509,7 +509,9 @@ namespace PSText.ViewModels
         /// </summary>
         /// <param name="label">操作名称。</param>
         /// <param name="transform">像素变换（纯函数，在后台线程执行）。</param>
-        private async Task ApplyOneShotAsync(string label, Func<PixelBuffer, Task<PixelBuffer>> transform)
+        private async Task ApplyOneShotAsync(
+            string label,
+            Func<PixelBuffer, CancellationToken, Task<PixelBuffer>> transform)
         {
             if (!HasDocument || IsBusy)
             {
@@ -522,6 +524,10 @@ namespace PSText.ViewModels
             }
 
             IsBusy = true;
+
+            // 大图上的滤镜 / 缩放 / 旋转可能跑十几秒，中途要能喊停。
+            // 令牌一路传到 PixelParallel（它本来就在逐块检查），所以取消是真能立刻生效的。
+            CancellationToken token = BeginCancellableOperation();
 
             try
             {
@@ -541,7 +547,9 @@ namespace PSText.ViewModels
                 PixelBuffer source = PixelBuffer.FromBitmap(_document.Bitmap);
                 StatusMessage = Loc.T("Adjust_Processing") + label;
 
-                PixelBuffer transformed = await transform(source).ConfigureAwait(true);
+                PixelBuffer transformed = await transform(source, token).ConfigureAwait(true);
+
+                token.ThrowIfCancellationRequested();
 
                 if (transformed == null)
                 {
@@ -552,6 +560,7 @@ namespace PSText.ViewModels
             }
             catch (OperationCanceledException)
             {
+                // 取消发生在提交之前，所以文档、历史、撤销栈全都保持原样 —— 这正是"取消"该有的样子。
                 StatusMessage = Loc.T("Adjust_Canceled") + label;
             }
             catch (Exception ex)
@@ -560,6 +569,7 @@ namespace PSText.ViewModels
             }
             finally
             {
+                EndCancellableOperation();
                 IsBusy = false;
             }
         }

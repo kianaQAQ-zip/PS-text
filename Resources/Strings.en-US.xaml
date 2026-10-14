@@ -694,4 +694,12 @@
   <sys:String x:Key="Batch_PushedToShared">These settings are now the shared settings</sys:String>
   <sys:String x:Key="Batch_PushToSharedConfirm">Replace the shared settings with this image's? Every image without its own settings will change too.</sys:String>
   <sys:String x:Key="Tab_Moved">Tab order updated: {0}</sys:String>
+  <sys:String x:Key="Meta_Label">Metadata</sys:String>
+  <sys:String x:Key="Meta_IndicatorExif">EXIF</sys:String>
+  <sys:String x:Key="Meta_IndicatorIcc">ICC</sys:String>
+  <sys:String x:Key="Meta_ToolTip">The source file carries EXIF / ICC. Shooting information and the color profile are kept when saving. The thumbnail is dropped and the orientation tag is reset; changing the format does not carry it over (EXIF cannot survive a format change).</sys:String>
+  <sys:String x:Key="Status_Cancelling">Cancelling…</sys:String>
+  <sys:String x:Key="Status_SaveCanceled">Save cancelled (the target file was left untouched)</sys:String>
+  <sys:String x:Key="Common_CancelOperation">Cancel</sys:String>
+  <sys:String x:Key="Tip_CancelOperation">Abort the current operation. Cancelling happens before anything is committed, so the document and its undo history are untouched.</sys:String>
 </ResourceDictionary>

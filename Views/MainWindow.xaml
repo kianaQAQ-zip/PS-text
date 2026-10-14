@@ -1860,6 +1860,14 @@
                      Foreground="{DynamicResource AccentBrush}" />
         </StackPanel>
 
+        <!-- 长操作（滤镜 / 缩放 / 旋转 / 保存）进行中时的取消入口 -->
+        <Button Content="{DynamicResource Common_CancelOperation}"
+                MinWidth="56" Margin="6,0,0,0" Padding="8,2" FontSize="11"
+                VerticalAlignment="Center" Cursor="Hand"
+                ToolTip="{DynamicResource Tip_CancelOperation}"
+                Visibility="{Binding CanCancelOperation, Converter={StaticResource BoolToVisibility}}"
+                Command="{Binding CancelOperationCommand}" />
+
         <StackPanel Grid.Column="2" Orientation="Horizontal">
           <TextBlock Style="{StaticResource StatusLabelStyle}" Text="{DynamicResource Resize_Size}" />
           <TextBlock Style="{StaticResource StatusTextStyle}" Text="{Binding PixelSizeText}" />
@@ -1872,6 +1880,16 @@
           <Rectangle Style="{StaticResource ToolbarSeparatorStyle}" Margin="4,5" />
           <TextBlock Style="{StaticResource StatusLabelStyle}" Text="{DynamicResource Print_Scale}" />
           <TextBlock Style="{StaticResource ZoomTextStyle}" Text="{Binding ZoomPercentText}" />
+          <Rectangle Style="{StaticResource ToolbarSeparatorStyle}" Margin="4,5" />
+          <!-- 元数据指示：只在源文件确实带 EXIF / ICC 时才占位置 -->
+          <StackPanel Orientation="Horizontal"
+                      Visibility="{Binding HasMetadataInfo, Converter={StaticResource BoolToVisibility}}">
+            <Rectangle Style="{StaticResource ToolbarSeparatorStyle}" Margin="4,5" />
+            <TextBlock Style="{StaticResource StatusLabelStyle}" Text="{DynamicResource Meta_Label}"
+                       ToolTip="{Binding MetadataToolTip}" />
+            <TextBlock Style="{StaticResource StatusTextStyle}" Text="{Binding MetadataText}"
+                       ToolTip="{Binding MetadataToolTip}" />
+          </StackPanel>
           <Rectangle Style="{StaticResource ToolbarSeparatorStyle}" Margin="4,5" />
           <TextBlock Style="{StaticResource StatusLabelStyle}" Text="{Binding HistoryText}"
                      ToolTip="{Binding HistoryText}" />

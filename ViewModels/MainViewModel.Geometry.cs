@@ -759,7 +759,7 @@ namespace PSText.ViewModels
         {
             // ApplyOneShotAsync 内部已经 try/catch 全包并会弹窗，异常不会逃逸。
             // 通知在这里补：尺寸变了要按新尺寸重新适配缩放，否则"适应窗口"会失效。
-            await ApplyOneShotAsync(label, buffer => geometry.ResizeAsync(buffer, width, height, kernel))
+            await ApplyOneShotAsync(label, (buffer, token) => geometry.ResizeAsync(buffer, width, height, kernel, token))
                 .ConfigureAwait(true);
 
             RefitAfterGeometryChange();
@@ -791,7 +791,7 @@ namespace PSText.ViewModels
         {
             await ApplyOneShotAsync(
                 label,
-                buffer => geometry.RotateArbitraryAsync(buffer, angle, background, crop)).ConfigureAwait(true);
+                (buffer, token) => geometry.RotateArbitraryAsync(buffer, angle, background, crop, token)).ConfigureAwait(true);
 
             RefitAfterGeometryChange();
         }

@@ -194,6 +194,7 @@
     <Compile Include="Services\CrashLogger.cs" />
     <Compile Include="Services\ProgressReporter.cs" />
     <Compile Include="Services\Imaging\ImageMetadataHelper.cs" />
+    <Compile Include="Services\Imaging\AtomicFileWriter.cs" />
     <Compile Include="Services\WindowPlacement.cs" />
     <Compile Include="Services\ILocalizationService.cs" />
     <Compile Include="Services\LocalizationService.cs" />

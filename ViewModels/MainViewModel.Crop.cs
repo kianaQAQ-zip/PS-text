@@ -418,7 +418,7 @@ namespace PSText.ViewModels
             GeometryFilters geometry = _geometryFilters;
             _pendingOperation = ApplyOneShotAsync(
                 Loc.T("Crop_Header"),
-                buffer => geometry.CropAsync(buffer, x, y, width, height));
+                (buffer, token) => geometry.CropAsync(buffer, x, y, width, height, token));
         }
     }
 }
