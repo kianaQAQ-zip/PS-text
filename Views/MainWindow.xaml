@@ -1389,8 +1389,15 @@
                   <ListBox.ItemTemplate>
                     <DataTemplate>
                       <StackPanel>
-                        <TextBlock x:Name="QueueItemName" Text="{Binding FileName}"
-                                   TextTrimming="CharacterEllipsis" />
+                        <DockPanel LastChildFill="True">
+                          <TextBlock x:Name="QueueItemCustomBadge" DockPanel.Dock="Right"
+                                     Margin="6,0,0,0" FontSize="10" Padding="4,0"
+                                     Foreground="{DynamicResource AccentBrush}"
+                                     Text="{DynamicResource Batch_CustomBadge}"
+                                     Visibility="{Binding HasCustomSteps, Converter={StaticResource BoolToVisibility}}" />
+                          <TextBlock x:Name="QueueItemName" Text="{Binding FileName}"
+                                     TextTrimming="CharacterEllipsis" />
+                        </DockPanel>
                         <TextBlock Text="{Binding Status}" FontSize="10" TextWrapping="Wrap"
                                    Foreground="{DynamicResource SubtleForegroundBrush}" />
                       </StackPanel>
@@ -1418,6 +1425,25 @@
                 <TextBlock Text="{DynamicResource Batch_OrderHint}"
                            Margin="0,4,0,0" FontSize="11" TextWrapping="Wrap"
                            Foreground="{DynamicResource SubtleForegroundBrush}" />
+
+                <!-- 每张图独立参数：编辑对象提示 + 三个切换按钮 -->
+                <TextBlock Margin="0,6,0,0" FontSize="11" TextWrapping="Wrap"
+                           Foreground="{DynamicResource AccentBrush}"
+                           Text="{Binding BatchEditorTargetText}" />
+                <WrapPanel Margin="0,4,0,0">
+                  <Button Content="{DynamicResource Batch_CustomizeItem}" MinWidth="0"
+                          Style="{StaticResource ToolbarButtonStyle}"
+                          Command="{Binding CustomizeBatchItemParamsCommand}" />
+                  <Button Content="{DynamicResource Batch_ResetItemScope}" MinWidth="0"
+                          Style="{StaticResource ToolbarButtonStyle}"
+                          Command="{Binding ResetBatchItemParamsCommand}" />
+                  <Button Content="{DynamicResource Batch_PushToShared}" MinWidth="0"
+                          Style="{StaticResource ToolbarButtonStyle}"
+                          Command="{Binding PushBatchItemParamsToSharedCommand}" />
+                </WrapPanel>
+                <TextBlock Margin="0,4,0,0" FontSize="11" TextWrapping="Wrap"
+                           Foreground="{DynamicResource SubtleForegroundBrush}"
+                           Text="{DynamicResource Batch_PerImageHint}" />
 
                 <DockPanel Margin="0,6,0,0" LastChildFill="True">
                   <Button DockPanel.Dock="Right" Content="{DynamicResource Batch_Add}" MinWidth="54" Margin="6,0,0,0"

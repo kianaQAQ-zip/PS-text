@@ -46,6 +46,71 @@ namespace PSText.ViewModels
         /// <summary>文件名（列表显示用）。</summary>
         public string FileName { get; private set; }
 
+        /// <summary>
+        /// 这张图**专属**的流水线步骤；<c>null</c> 表示"跟随公共设置"。
+        ///
+        /// 语义刻意做成"要不要有一份自己的"这种二选一，而不是"逐个参数打补丁"：
+        /// 前者用户一眼能看懂（有自定义标记的图不跟着公共设置变），
+        /// 后者得时刻回答"我这一个参数到底算不算被覆盖了"。
+        /// </summary>
+        public ObservableCollection<BatchStepViewModel> Steps { get; private set; }
+
+        /// <summary>是否单独设置了参数（列表里显示标记）。</summary>
+        public bool HasCustomSteps
+        {
+            get { return Steps != null; }
+        }
+
+        /// <summary>参数来源的说明文字（参数面板顶部显示）。</summary>
+        public string ParameterScopeText
+        {
+            get { return HasCustomSteps ? Loc.T("Batch_ParamsCustom") : Loc.T("Batch_ParamsShared"); }
+        }
+
+        /// <summary>
+        /// 以公共流水线为模板，为这张图建一份**深拷贝**的自有步骤。
+        ///
+        /// 必须深拷贝（<see cref="IBatchStep.Clone"/>）：否则"给这张图单独设参数"会连带改掉公共设置，
+        /// 那是这个功能最要命的错法。
+        /// </summary>
+        internal void CustomizeSteps(IList<BatchStepViewModel> template)
+        {
+            ObservableCollection<BatchStepViewModel> copy =
+                new ObservableCollection<BatchStepViewModel>();
+
+            if (template != null)
+            {
+                for (int i = 0; i < template.Count; i++)
+                {
+                    copy.Add(new BatchStepViewModel(template[i].Step.Clone(), i + 1));
+                }
+            }
+
+            Steps = copy;
+            RaiseStepsChanged();
+        }
+
+        /// <summary>丢弃自有步骤，重新跟随公共设置。</summary>
+        internal void ResetSteps()
+        {
+            Steps = null;
+            RaiseStepsChanged();
+        }
+
+        /// <summary>用一份步骤整体替换自有步骤（"把这张图的参数应用到公共设置"的反向同步用）。</summary>
+        internal void ReplaceSteps(ObservableCollection<BatchStepViewModel> steps)
+        {
+            Steps = steps;
+            RaiseStepsChanged();
+        }
+
+        internal void RaiseStepsChanged()
+        {
+            OnPropertyChanged("Steps");
+            OnPropertyChanged("HasCustomSteps");
+            OnPropertyChanged("ParameterScopeText");
+        }
+
         /// <summary>该项的处理状态。</summary>
         public string Status
         {
@@ -174,8 +239,32 @@ namespace PSText.ViewModels
         private readonly ObservableCollection<BatchItemViewModel> _batchQueue =
             new ObservableCollection<BatchItemViewModel>();
 
-        private readonly ObservableCollection<BatchStepViewModel> _batchSteps =
+        /// <summary>公共流水线（对所有未单独设置参数的图生效）。</summary>
+        private readonly ObservableCollection<BatchStepViewModel> _sharedBatchSteps =
             new ObservableCollection<BatchStepViewModel>();
+
+        /// <summary>
+        /// **当前参数面板正在编辑的那一份**步骤列表。
+        ///
+        /// 选中图有自己的步骤时返回它的，否则返回公共列表。
+        /// 做成转发属性（而不是让调用方到处判断）的理由和标签页那次一样：
+        /// 下面几十处参数编辑代码看起来仍在改"流水线"，实际改的是当前编辑对象，
+        /// 一行都不用动，而"切换编辑对象 = 换一整套参数"自动成立。
+        /// </summary>
+        private ObservableCollection<BatchStepViewModel> _batchSteps
+        {
+            get
+            {
+                BatchItemViewModel item = _selectedBatchItem;
+
+                if (item != null && item.Steps != null)
+                {
+                    return item.Steps;
+                }
+
+                return _sharedBatchSteps;
+            }
+        }
 
         private readonly List<BatchStepKindOption> _batchStepKindOptions = new List<BatchStepKindOption>
         {
@@ -268,6 +357,13 @@ namespace PSText.ViewModels
                 if (SetProperty(ref _selectedBatchItem, value, "SelectedBatchItem"))
                 {
                     OnPropertyChanged("BatchTargetPathText");
+
+                    // 切换选中项会换掉"正在编辑哪一份步骤"，所以必须整体刷新面板 ——
+                    // 少刷一项就会看到上一张图的参数。这与切换标签页是同一条纪律。
+                    RefreshBatchStepEditor();
+                    OnPropertyChanged("IsEditingItemParameters");
+                    OnPropertyChanged("BatchEditorTargetText");
+                    RelayCommand.RaiseCanExecuteChanged();
                     RequestBatchPreview();
                 }
             }
@@ -528,7 +624,7 @@ namespace PSText.ViewModels
         /// <summary>当前流水线的可读描述（如 “尺寸缩放 → 文字水印”）。</summary>
         public string BatchStepChainText
         {
-            get { return BatchPipeliner.Describe(SnapshotBatchSteps()); }
+            get { return BatchPipeliner.Describe(SnapshotActiveSteps()); }
         }
 
         #endregion
@@ -577,6 +673,15 @@ namespace PSText.ViewModels
         /// <summary>取消批量处理。</summary>
         public ICommand CancelBatchRunCommand { get; private set; }
 
+        /// <summary>为选中的图单独设置参数（以公共流水线为模板）。</summary>
+        public ICommand CustomizeBatchItemParamsCommand { get; private set; }
+
+        /// <summary>把选中的图恢复为公共设置。</summary>
+        public ICommand ResetBatchItemParamsCommand { get; private set; }
+
+        /// <summary>把这张图的参数推回公共设置，让其余图跟着变。</summary>
+        public ICommand PushBatchItemParamsToSharedCommand { get; private set; }
+
         /// <summary>装配批量相关命令（在构造函数中调用一次）。</summary>
         private void InitializeBatchCommands()
         {
@@ -594,6 +699,7 @@ namespace PSText.ViewModels
                 () =>
                 {
                     _batchQueue.Clear();
+                    NotifyQueueChanged();
                     SelectedBatchItem = null;
                     RefreshBatchQueueState();
                 },
@@ -636,6 +742,18 @@ namespace PSText.ViewModels
                       && !string.IsNullOrWhiteSpace(_batchOutputDirectory)
                       && !_isBatchRunning
                       && !IsBusy);
+
+            CustomizeBatchItemParamsCommand = new RelayCommand(
+                CustomizeSelectedItemParameters,
+                () => CanCustomizeSelectedItem);
+
+            ResetBatchItemParamsCommand = new RelayCommand(
+                ResetSelectedItemParameters,
+                () => CanResetSelectedItem);
+
+            PushBatchItemParamsToSharedCommand = new RelayCommand(
+                PushSelectedItemToShared,
+                () => CanPushItemToShared);
 
             CancelBatchRunCommand = new RelayCommand(
                 () =>
@@ -806,6 +924,7 @@ namespace PSText.ViewModels
             }
 
             _batchQueue.Remove(item);
+            NotifyQueueChanged();
 
             if (ReferenceEquals(_selectedBatchItem, item))
             {
@@ -911,10 +1030,7 @@ namespace PSText.ViewModels
 
         private void RefreshBatchStepState()
         {
-            for (int i = 0; i < _batchSteps.Count; i++)
-            {
-                _batchSteps[i].SetOrder(i + 1);
-            }
+            ReindexBatchSteps();
 
             OnPropertyChanged("BatchStepChainText");
             RaiseBatchEditPropertiesChanged();
@@ -922,14 +1038,135 @@ namespace PSText.ViewModels
             RelayCommand.RaiseCanExecuteChanged();
         }
 
-        /// <summary>把步骤列表取成一个**副本**，供流水线执行使用。</summary>
-        private List<IBatchStep> SnapshotBatchSteps()
+        /// <summary>
+        /// **取某张图实际要跑的步骤** —— 预览与实际输出都必须走这里，不能各取各的。
+        ///
+        /// 这是整个"每张图独立参数"的正确性支点：预览一旦用的是公共流水线，
+        /// 用户就会看着一个不是这张图参数的效果去点"开始处理"，那正是本项目一直在避免的"预览骗人"。
+        /// </summary>
+        private List<IBatchStep> ResolveStepsFor(BatchItemViewModel item)
         {
-            List<IBatchStep> steps = new List<IBatchStep>(_batchSteps.Count);
-
-            for (int i = 0; i < _batchSteps.Count; i++)
+            if (item == null || item.Steps == null)
             {
-                steps.Add(_batchSteps[i].Step);
+                return SnapshotSharedSteps();
+            }
+
+            ObservableCollection<BatchStepViewModel> own = item.Steps;
+            List<IBatchStep> steps = new List<IBatchStep>(own.Count);
+
+            for (int i = 0; i < own.Count; i++)
+            {
+                steps.Add(own[i].Step);
+            }
+
+            return steps;
+        }
+
+        /// <summary>切换编辑对象后，把参数面板整体刷一遍。</summary>
+        private void RefreshBatchStepEditor()
+        {
+            ReindexBatchSteps();
+
+            ObservableCollection<BatchStepViewModel> active = _batchSteps;
+
+            // 选中项必须属于当前这一份列表 —— 否则参数区会去编辑上一张图的步骤。
+            if (_selectedBatchStep == null || !active.Contains(_selectedBatchStep))
+            {
+                _selectedBatchStep = active.Count > 0 ? active[0] : null;
+                OnPropertyChanged("SelectedBatchStep");
+            }
+
+            OnPropertyChanged("BatchSteps");
+            OnPropertyChanged("BatchStepChainText");
+            OnPropertyChanged("HasSelectedBatchStep");
+            OnPropertyChanged("IsEditingItemParameters");
+            OnPropertyChanged("BatchEditorTargetText");
+            RaiseBatchEditPropertiesChanged();
+            RelayCommand.RaiseCanExecuteChanged();
+        }
+
+        /// <summary>重排某一份步骤列表的序号。</summary>
+        private static void ReindexSteps(IList<BatchStepViewModel> steps)
+        {
+            if (steps == null)
+            {
+                return;
+            }
+
+            for (int i = 0; i < steps.Count; i++)
+            {
+                steps[i].SetOrder(i + 1);
+            }
+        }
+
+        /// <summary>重排公共列表与（若有）当前编辑对象的列表。</summary>
+        private void ReindexBatchSteps()
+        {
+            ReindexSteps(_sharedBatchSteps);
+
+            BatchItemViewModel item = _selectedBatchItem;
+
+            if (item != null && item.Steps != null)
+            {
+                ReindexSteps(item.Steps);
+            }
+        }
+
+        /// <summary>
+        /// 队列增删后同步参数面板。
+        ///
+        /// 关键情形：被删掉的那张图**正被编辑**。不处理的话面板会指着一个已经不在队列里的对象，
+        /// 用户改的参数写进虚空 —— 而且界面上看不出任何异常。
+        /// </summary>
+        private void NotifyQueueChanged()
+        {
+            BatchItemViewModel item = _selectedBatchItem;
+
+            if (item != null && !_batchQueue.Contains(item))
+            {
+                _selectedBatchItem = null;
+                OnPropertyChanged("SelectedBatchItem");
+            }
+
+            RefreshBatchStepEditor();
+            OnPropertyChanged("BatchEditorTargetText");
+            OnPropertyChanged("IsEditingItemParameters");
+            RequestBatchPreview();
+            RelayCommand.RaiseCanExecuteChanged();
+        }
+
+        /// <summary>
+        /// **公共流水线**的快照（供实际执行使用）。
+        ///
+        /// ⚠️ 这里必须直接用 <c>_sharedBatchSteps</c>，**不能**用转发属性 <c>_batchSteps</c>。
+        /// 踩过一次：转发属性会跟着"当前参数面板在编辑谁"变，于是选中某张自定义图之后，
+        /// 其余所有图都会跟着用那张图的参数跑 —— 这个功能最要命的错法，而且界面上完全看不出来。
+        /// 自检里"B 应当跟随公共设置把水印放在右下"那条断言就是专门抓这件事的。
+        /// </summary>
+        private List<IBatchStep> SnapshotSharedSteps()
+        {
+            List<IBatchStep> steps = new List<IBatchStep>(_sharedBatchSteps.Count);
+
+            for (int i = 0; i < _sharedBatchSteps.Count; i++)
+            {
+                steps.Add(_sharedBatchSteps[i].Step);
+            }
+
+            return steps;
+        }
+
+        /// <summary>
+        /// **当前参数面板在编辑的那一份**的快照（仅供界面显示流水线摘要用）。
+        /// 执行路径一律走 <see cref="SnapshotSharedSteps"/> 或 <see cref="ResolveStepsFor"/>。
+        /// </summary>
+        private List<IBatchStep> SnapshotActiveSteps()
+        {
+            ObservableCollection<BatchStepViewModel> active = _batchSteps;
+            List<IBatchStep> steps = new List<IBatchStep>(active.Count);
+
+            for (int i = 0; i < active.Count; i++)
+            {
+                steps.Add(active[i].Step);
             }
 
             return steps;
@@ -995,6 +1232,144 @@ namespace PSText.ViewModels
         {
             get { return _selectedBatchStep != null; }
         }
+
+        #region 每张图独立参数
+
+        /// <summary>当前编辑对象是不是"某张图自己的参数"。</summary>
+        public bool IsEditingItemParameters
+        {
+            get { return _selectedBatchItem != null && _selectedBatchItem.HasCustomSteps; }
+        }
+
+        /// <summary>参数面板顶部的"正在编辑谁"。</summary>
+        public string BatchEditorTargetText
+        {
+            get
+            {
+                BatchItemViewModel item = _selectedBatchItem;
+
+                if (item == null)
+                {
+                    return Loc.T("Batch_EditorTargetNone");
+                }
+
+                return string.Format(
+                    CultureInfo.CurrentCulture,
+                    Loc.T("Batch_EditorTarget"),
+                    item.FileName,
+                    item.ParameterScopeText);
+            }
+        }
+
+        /// <summary>能不能给当前选中的图建独立参数（已经有的、或正在跑的都不行）。</summary>
+        public bool CanCustomizeSelectedItem
+        {
+            get
+            {
+                return _selectedBatchItem != null
+                       && !_selectedBatchItem.HasCustomSteps
+                       && !_isBatchRunning;
+            }
+        }
+
+        /// <summary>能不能把当前选中图恢复为公共设置。</summary>
+        public bool CanResetSelectedItem
+        {
+            get
+            {
+                return _selectedBatchItem != null
+                       && _selectedBatchItem.HasCustomSteps
+                       && !_isBatchRunning;
+            }
+        }
+
+        /// <summary>能不能把当前选中图的参数推回公共设置。</summary>
+        public bool CanPushItemToShared
+        {
+            get
+            {
+                return _selectedBatchItem != null
+                       && _selectedBatchItem.Steps != null
+                       && _selectedBatchItem.Steps.Count > 0
+                       && !_isBatchRunning;
+            }
+        }
+
+        /// <summary>为选中的图单独设置参数（以公共流水线为模板深拷贝一份）。</summary>
+        private void CustomizeSelectedItemParameters()
+        {
+            BatchItemViewModel item = _selectedBatchItem;
+
+            if (item == null || item.HasCustomSteps)
+            {
+                return;
+            }
+
+            item.CustomizeSteps(_sharedBatchSteps);
+
+            // 编辑对象换成了这张图的副本，面板必须整体刷新
+            RefreshBatchStepEditor();
+            RequestBatchPreview();
+
+            StatusMessage = Loc.T("Batch_CustomizedItem", item.FileName);
+        }
+
+        /// <summary>把选中的图恢复为公共设置。</summary>
+        private void ResetSelectedItemParameters()
+        {
+            BatchItemViewModel item = _selectedBatchItem;
+
+            if (item == null || !item.HasCustomSteps)
+            {
+                return;
+            }
+
+            string name = item.FileName;
+            item.ResetSteps();
+
+            RefreshBatchStepEditor();
+            RequestBatchPreview();
+
+            StatusMessage = Loc.T("Batch_ResetItemScope", name);
+        }
+
+        /// <summary>
+        /// 把这张图的参数推回公共设置（其余没单独设置的图会跟着变）。
+        ///
+        /// 存在的意义：用户往往是"先把某一张调到满意，再推广到整批"，
+        /// 没有这条就只能从头把参数再调一遍。
+        /// </summary>
+        private void PushSelectedItemToShared()
+        {
+            BatchItemViewModel item = _selectedBatchItem;
+
+            if (item == null || item.Steps == null || item.Steps.Count == 0)
+            {
+                return;
+            }
+
+            if (_dialogService.Confirm(Loc.T("Batch_PushToSharedConfirm"), Loc.T("Batch_Label")) != ConfirmResult.Yes)
+            {
+                return;
+            }
+
+            _sharedBatchSteps.Clear();
+
+            for (int i = 0; i < item.Steps.Count; i++)
+            {
+                _sharedBatchSteps.Add(new BatchStepViewModel(item.Steps[i].Step.Clone(), i + 1));
+            }
+
+            SelectedBatchStep = null;
+            RefreshBatchStepEditor();
+
+            // 公共设置变了 -> 所有跟随公共设置的图预览都会变
+            RequestBatchPreview();
+
+            StatusMessage = Loc.T("Batch_PushedToShared");
+        }
+
+        #endregion
 
         private bool SelectedStepKindIs(BatchStepKind kind)
         {
@@ -1855,7 +2230,9 @@ namespace PSText.ViewModels
                 // 真实缩放比：GetPreview 按整数因子抽样，所以这里是精确值。
                 double scale = full.Width <= 0 ? 1.0 : small.Width / (double)full.Width;
                 BatchContext context = new BatchContext(scale, document.DpiX, document.DpiY);
-                List<IBatchStep> steps = SnapshotBatchSteps();
+
+                // 预览取的是**这张图自己的**步骤（没有自定义才退回公共设置）
+                List<IBatchStep> steps = ResolveStepsFor(item);
 
                 PixelBuffer result = await Task
                     .Run(() => BatchPipeliner.Run(small, steps, context, CancellationToken.None))
@@ -1923,8 +2300,26 @@ namespace PSText.ViewModels
                 return;
             }
 
-            List<IBatchStep> steps = SnapshotBatchSteps();
+            List<IBatchStep> sharedSteps = SnapshotSharedSteps();
             List<BatchItemViewModel> items = new List<BatchItemViewModel>(_batchQueue);
+
+            // 确认框里要如实说明"这批里有几张不按公共流水线走"—— 用户点了确定就该心里有数
+            int customizedCount = 0;
+
+            for (int i = 0; i < items.Count; i++)
+            {
+                if (items[i].HasCustomSteps)
+                {
+                    customizedCount++;
+                }
+            }
+
+            string pipelineText = BatchPipeliner.Describe(sharedSteps);
+
+            if (customizedCount > 0)
+            {
+                pipelineText += Loc.T("Batch_ConfirmCustomSuffix", customizedCount);
+            }
 
             string suffix = BatchOutputNaming.SanitizeFileNamePart(_batchFileNameSuffix);
             string outputDirectory = _batchOutputDirectory;
@@ -1940,7 +2335,7 @@ namespace PSText.ViewModels
                 CultureInfo.InvariantCulture,
                 Loc.T("Batch_ConfirmBody"),
                 items.Count,
-                BatchPipeliner.Describe(steps),
+                pipelineText,
                 formatText,
                 string.IsNullOrEmpty(suffix) ? Loc.T("Batch_NoSuffix") : suffix,
                 outputDirectory);
@@ -2016,6 +2411,9 @@ namespace PSText.ViewModels
 
                         PixelBuffer source = PixelBuffer.FromBitmap(document.Bitmap);
                         CancellationToken token = cts.Token;
+
+                        // 每张图各自的步骤（在循环里取，所以自定义得晚一点加进来也生效）
+                        List<IBatchStep> steps = ResolveStepsFor(item);
 
                         PixelBuffer result = await Task
                             .Run(() => BatchPipeliner.Run(source, steps, BatchContext.FullResolution, token), token)

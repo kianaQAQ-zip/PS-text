@@ -25,7 +25,7 @@
 - WPF + .NET Framework 4.8，`AnyCPU + Prefer32Bit=true`（32 位运行）。
 - **零第三方 NuGet**——引入任何依赖前必须先向用户确认。
 - 构建产物在 `build/bin`（`Directory.Build.props` 定制），`.csproj` 为传统显式包含（**新文件必须手工加 `<Compile Include>`**）。
-- 自检在 `SelfTest.cs`（约 11,900 行 / **346 断言**），`PSText.exe --selftest` 运行。
+- 自检在 `SelfTest.cs`（约 12,400 行 / **358 断言**），`PSText.exe --selftest` 运行。
   ⚠️ 其中**文件关联的写入流程约 18 项在本机是 Skip 的**（本机工具层拦下可执行文件写注册表，
   已核实非代码问题）。自检先探测 HKCU 可写性，不可写就明确 Skip，避免恒红。
 - MVVM：VM 只依赖 `IImageService / IDialogService / IDispatcherService / IPrintService`，**不得引用 WPF 控件类型**。
@@ -206,3 +206,16 @@
   ⚠️ **重复键会让整本 ResourceDictionary 加载失败**，且表现是所有 `{DynamicResource}` 变空串（不报错）。
 - **两道源码守卫**（自检 [40]）：界面与 C# 都不允许硬编码中文（`Debug` 输出 / `Program.cs` /
   `CrashLogger` / 语言名除外）。这条守卫真抓到过 `InputGestureText="空格"` —— 值得保留。
+
+## 批量「每张图独立参数」（2026-10-14 完成）
+- `BatchItemViewModel.Steps`（`null` = 跟随公共设置）；面板的 `_batchSteps` 做成**转发属性**
+  ⇒ 二十多处参数编辑代码一行未改。粒度是**完整流水线副本**（深拷贝，`IBatchStep.Clone()` 必用）。
+- 取步骤只留一个入口 `ResolveStepsFor(item)`：**预览与实际输出都必须走它**，
+  否则预览会用公共流水线去显示一张自定义图的效果 = 预览骗人。
+- ⚠️ **转发属性会悄悄改掉"这个字段指谁"的语义**：`_batchSteps` 变成转发属性后，
+  `SnapshotBatchSteps()` 里的它就不再是公共列表了 —— 表现为"选中某张自定义图后，
+  其余所有图都跟着用那张图的参数"，界面上完全看不出来。
+  已拆成 `SnapshotSharedSteps()`（执行用）与 `SnapshotActiveSteps()`（仅界面摘要用）。
+  **凡"快照/执行"路径一律显式点名 `_sharedXxx`，不要复用转发属性。**
+- 这类"状态串味"要用**输出像素**去断言（比对象引用强得多）：端到端跑一遍，
+  数输出文件里水印落在哪个象限。

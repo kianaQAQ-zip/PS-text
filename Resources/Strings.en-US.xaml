@@ -677,4 +677,20 @@
   <sys:String x:Key="Meta_PhysicalSize">{0:0.##} × {1:0.##} in ({2:0.#} × {3:0.#} cm)</sys:String>
   <sys:String x:Key="Adjust_Summary">Brightness {0:0} / Contrast {1:0} / Saturation {2:0} / Temperature {3:0}</sys:String>
   <sys:String x:Key="Settings_WriteFailed">[XmlSettingsService] Failed to write settings </sys:String>
+
+  <!-- 每张图独立参数 -->
+  <sys:String x:Key="Batch_ParamsShared">shared settings</sys:String>
+  <sys:String x:Key="Batch_ParamsCustom">custom settings</sys:String>
+  <sys:String x:Key="Batch_EditorTarget">Editing settings for: {0} ({1})</sys:String>
+  <sys:String x:Key="Batch_EditorTargetNone">Editing settings for: shared (no image selected)</sys:String>
+  <sys:String x:Key="Batch_CustomizeItem">Give this image its own settings</sys:String>
+  <sys:String x:Key="Batch_ResetItemScope">Revert to shared settings</sys:String>
+  <sys:String x:Key="Batch_PushToShared">Apply these settings to shared</sys:String>
+  <sys:String x:Key="Batch_CustomBadge">Custom</sys:String>
+  <sys:String x:Key="Batch_PerImageHint">An image with its own settings no longer follows the shared pipeline (it is marked “Custom”). The preview always reflects the selected image's own settings.</sys:String>
+  <sys:String x:Key="Batch_ConfirmCustomSuffix"> ({0} have their own settings)</sys:String>
+  <sys:String x:Key="Batch_CustomizedItem">“{0}” now has its own settings</sys:String>
+  <sys:String x:Key="Batch_ResetItemDone">“{0}” now follows the shared settings</sys:String>
+  <sys:String x:Key="Batch_PushedToShared">These settings are now the shared settings</sys:String>
+  <sys:String x:Key="Batch_PushToSharedConfirm">Replace the shared settings with this image's? Every image without its own settings will change too.</sys:String>
 </ResourceDictionary>

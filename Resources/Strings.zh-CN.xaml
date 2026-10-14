@@ -677,4 +677,20 @@
   <sys:String x:Key="Meta_PhysicalSize">{0:0.##} × {1:0.##} 英寸 ({2:0.#} × {3:0.#} 厘米)</sys:String>
   <sys:String x:Key="Adjust_Summary">亮度 {0:0} / 对比度 {1:0} / 饱和度 {2:0} / 色温 {3:0}</sys:String>
   <sys:String x:Key="Settings_WriteFailed">[XmlSettingsService] 写入设置失败 </sys:String>
+
+  <!-- 每张图独立参数 -->
+  <sys:String x:Key="Batch_ParamsShared">公共设置</sys:String>
+  <sys:String x:Key="Batch_ParamsCustom">单独设置</sys:String>
+  <sys:String x:Key="Batch_EditorTarget">参数编辑对象：{0}（{1}）</sys:String>
+  <sys:String x:Key="Batch_EditorTargetNone">参数编辑对象：公共设置（未选中图片）</sys:String>
+  <sys:String x:Key="Batch_CustomizeItem">为这张图单独设置参数</sys:String>
+  <sys:String x:Key="Batch_ResetItemScope">恢复为公共设置</sys:String>
+  <sys:String x:Key="Batch_PushToShared">把这张图的参数应用到公共设置</sys:String>
+  <sys:String x:Key="Batch_CustomBadge">自定义</sys:String>
+  <sys:String x:Key="Batch_PerImageHint">给某张图单独设参数后，它会脱离公共流水线（图上会标「自定义」）。预览始终按选中图自己的参数算。</sys:String>
+  <sys:String x:Key="Batch_ConfirmCustomSuffix">（其中 {0} 张单独设置了参数）</sys:String>
+  <sys:String x:Key="Batch_CustomizedItem">已为「{0}」建立独立参数</sys:String>
+  <sys:String x:Key="Batch_ResetItemDone">已把「{0}」恢复为公共设置</sys:String>
+  <sys:String x:Key="Batch_PushedToShared">已把这张图的参数应用为公共设置</sys:String>
+  <sys:String x:Key="Batch_PushToSharedConfirm">用这张图的参数覆盖当前公共设置？其余未单独设置的图片都会跟着变。</sys:String>
 </ResourceDictionary>

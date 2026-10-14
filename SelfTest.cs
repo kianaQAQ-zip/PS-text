@@ -6048,6 +6048,7 @@ namespace PSText
                 CheckBatchOutputNaming(tempRoot, ref checks, ref failures, log);
                 CheckBatchOffUiThread(ref checks, ref failures, log);
                 CheckBatchEndToEnd(imageService, tempRoot, ref checks, ref failures, log);
+                CheckBatchPerImageParameters(imageService, tempRoot, ref checks, ref failures, log);
             }
             catch (Exception ex)
             {
@@ -10320,6 +10321,418 @@ namespace PSText
             }
 
             return null;
+        }
+
+        /// <summary>
+        /// 校验"每张图独立参数"。
+        ///
+        /// 这个功能最要命的错法是**隔离没做干净**：给一张图单独设参数，结果连带改掉了公共设置
+        /// 或者别的图。所以核心断言不是"能不能设"，而是：
+        ///   * 改 A 的自定义参数 ⇒ 公共设置与 B 都不变；
+        ///   * 改公共设置 ⇒ 已脱离的 A 不变，仍跟随的 B 跟着变；
+        ///   * 最后**跑一遍真的批量处理**，用输出文件里的水印位置来证明两张图确实各按各的跑
+        ///     （这比只断言对象引用强得多，因为它验的是最终像素）。
+        /// </summary>
+        private static void CheckBatchPerImageParameters(
+            IImageService imageService,
+            string tempRoot,
+            ref int checks,
+            ref int failures,
+            StringBuilder log)
+        {
+            log.AppendLine("[41] 批量：每张图独立参数");
+
+            string root = Path.Combine(tempRoot, "batch-per-image");
+            string sourceDirectory = Path.Combine(root, "src");
+            string outputDirectory = Path.Combine(root, "out");
+            Directory.CreateDirectory(sourceDirectory);
+
+            string pathA = Path.Combine(sourceDirectory, "a.png");
+            string pathB = Path.Combine(sourceDirectory, "b.png");
+
+            // 纯深色底：白色水印落在哪一边，用象限亮度就能判出来
+            SaveSolidImage(pathA, 600, 400, 20, 20, 20);
+            SaveSolidImage(pathB, 600, 400, 20, 20, 20);
+
+            try
+            {
+                MainViewModel viewModel = new MainViewModel(
+                    imageService, new NullDialogService(), new ImmediateDispatcherService());
+
+                viewModel.BatchOutputDirectory = outputDirectory;
+                viewModel.BatchFileNameSuffix = "_pi";
+                viewModel.BatchOutputFormat = new BatchOutputFormatOption(ImageFileFormat.Png, "PNG");
+
+                viewModel.BatchSteps.Add(new BatchStepViewModel(
+                    new BatchWatermarkStep
+                    {
+                        Text = "公共水印",
+                        SizeMode = WatermarkSizeMode.RelativeToWidth,
+                        FontSize = 6.0,
+                        Anchor = TextAnchor.BottomRight,
+                        Margin = 2.0,
+                        Opacity = 255,
+                        Shadow = false
+                    }, 1));
+
+                viewModel.AddBatchQueueItem(pathA);
+                viewModel.AddBatchQueueItem(pathB);
+
+                BatchItemViewModel itemA = viewModel.BatchQueue[0];
+                BatchItemViewModel itemB = viewModel.BatchQueue[1];
+
+                // ---- 初始：两张图都跟随公共设置 ----
+                checks++;
+                if (itemA.HasCustomSteps || itemB.HasCustomSteps)
+                {
+                    failures++;
+                    log.AppendLine("  FAIL 未做任何设置时两张图都不该有独立参数");
+                }
+                else
+                {
+                    log.AppendLine("  OK   两张图默认都跟随公共设置");
+                }
+
+                // 注意：BatchSteps 是"当前编辑对象"的转发属性 —— 选中 A 之后它就指向 A 的列表了。
+                // 所以要在这之前先抓住公共那一步的引用，否则后面的"深拷贝"断言等于在同义反复。
+                IBatchStep sharedStepReference = viewModel.BatchSteps[0].Step;
+
+                // ---- 为 A 建立独立参数 ----
+                viewModel.SelectedBatchItem = itemA;
+                viewModel.CustomizeBatchItemParamsCommand.Execute(null);
+
+                checks++;
+                if (!itemA.HasCustomSteps || itemB.HasCustomSteps)
+                {
+                    failures++;
+                    log.AppendLine(string.Format(
+                        "  FAIL 应当只有 A 变成独立参数（A={0}，B={1}）", itemA.HasCustomSteps, itemB.HasCustomSteps));
+                }
+                else if (itemA.Steps.Count != viewModel.BatchSteps.Count)
+                {
+                    failures++;
+                    log.AppendLine("  FAIL 独立参数应当以公共流水线为模板复制一份");
+                }
+                else
+                {
+                    log.AppendLine("  OK   为 A 建立了独立参数（以公共流水线为模板），B 仍跟随公共设置");
+                }
+
+                // ---- 深拷贝：必须是新对象，不能是同一个引用 ----
+                checks++;
+                if (ReferenceEquals(itemA.Steps[0].Step, sharedStepReference))
+                {
+                    failures++;
+                    log.AppendLine("  FAIL 独立参数必须是深拷贝（现在是同一个步骤对象，改一张会改到全部）");
+                }
+                else
+                {
+                    log.AppendLine("  OK   独立参数是深拷贝（与公共设置不是同一个对象）");
+                }
+
+                // ---- 面板现在编辑的是 A 的那一份 ----
+                checks++;
+                if (!ReferenceEquals(viewModel.SelectedBatchStep, null)
+                    && !itemA.Steps.Contains(viewModel.SelectedBatchStep))
+                {
+                    failures++;
+                    log.AppendLine("  FAIL 参数面板应当自动切到 A 的步骤列表");
+                }
+                else
+                {
+                    log.AppendLine("  OK   选中 A 后参数面板编辑的是 A 自己的步骤");
+                }
+
+                // ---- 改 A 的水印 ⇒ 公共设置与 B 都不能变（核心隔离断言）----
+                viewModel.BatchWatermarkText = "A专用";
+                viewModel.BatchWatermarkAnchor = TextAnchor.TopLeft;
+
+                BatchWatermarkStep sharedStep = (BatchWatermarkStep)sharedStepReference;
+                BatchWatermarkStep itemAStep = (BatchWatermarkStep)itemA.Steps[0].Step;
+
+                // B 没有自有步骤（Steps == null），它实际用的就是公共那一步 —— 直接取公共对象。
+                BatchWatermarkStep itemBStep = sharedStep;
+
+                checks++;
+                if (!string.Equals(sharedStep.Text, "公共水印", StringComparison.Ordinal)
+                    || sharedStep.Anchor != TextAnchor.BottomRight)
+                {
+                    failures++;
+                    log.AppendLine(string.Format(
+                        "  FAIL 改 A 的参数影响到了公共设置（公共水印变成了「{0}」/ {1}）", sharedStep.Text, sharedStep.Anchor));
+                }
+                else if (!string.Equals(itemBStep.Text, "公共水印", StringComparison.Ordinal))
+                {
+                    failures++;
+                    log.AppendLine("  FAIL 改 A 的参数影响到了 B —— 隔离没做干净");
+                }
+                else if (!string.Equals(itemAStep.Text, "A专用", StringComparison.Ordinal)
+                         || itemAStep.Anchor != TextAnchor.TopLeft)
+                {
+                    failures++;
+                    log.AppendLine(string.Format(
+                        "  FAIL A 自己的参数没改上（「{0}」/ {1}）", itemAStep.Text, itemAStep.Anchor));
+                }
+                else
+                {
+                    log.AppendLine("  OK   改 A 的参数只落在 A 身上：公共设置与 B 都是「公共水印」/ 右下");
+                }
+
+                // ---- 命令可用性 ----
+                checks++;
+                if (viewModel.CanCustomizeSelectedItem || !viewModel.CanResetSelectedItem
+                    || !viewModel.CanPushItemToShared)
+                {
+                    failures++;
+                    log.AppendLine("  FAIL A 已独立后：应当不能重复建立，但能恢复 / 推回公共");
+                }
+                else
+                {
+                    log.AppendLine("  OK   按钮可用状态正确（已独立 ⇒ 不能重复建立，可恢复、可推回公共）");
+                }
+
+                // ---- 改公共设置 ⇒ 已脱离的 A 不变，仍跟随的 B 跟着变 ----
+                viewModel.SelectedBatchItem = null;
+                viewModel.BatchWatermarkText = "公共第二版";
+                viewModel.SelectedBatchItem = itemA;
+
+                checks++;
+                BatchWatermarkStep sharedAfter = (BatchWatermarkStep)sharedStepReference;
+
+                if (!string.Equals(sharedAfter.Text, "公共第二版", StringComparison.Ordinal))
+                {
+                    failures++;
+                    log.AppendLine("  FAIL 选中项为空时改的应当是公共设置");
+                }
+                else if (!string.Equals(itemAStep.Text, "A专用", StringComparison.Ordinal))
+                {
+                    failures++;
+                    log.AppendLine(string.Format(
+                        "  FAIL A 已脱离公共设置，不该被改到（现在是「{0}」）", itemAStep.Text));
+                }
+                else if (!string.Equals(itemBStep.Text, "公共第二版", StringComparison.Ordinal))
+                {
+                    failures++;
+                    log.AppendLine(string.Format(
+                        "  FAIL B 仍跟随公共设置，应当跟着变成「公共第二版」（现在是「{0}」）", itemBStep.Text));
+                }
+                else
+                {
+                    log.AppendLine("  OK   改公共设置：已脱离的 A 不受影响，仍跟随的 B 跟着变了");
+                }
+
+                // ---- 真的跑一遍：用输出像素证明两张图各按各的跑 ----
+                viewModel.RunBatchAsync().GetAwaiter().GetResult();
+
+                string outputA = itemA.OutputPath;
+                string outputB = itemB.OutputPath;
+
+                checks++;
+                if (string.IsNullOrEmpty(outputA) || !File.Exists(outputA)
+                    || string.IsNullOrEmpty(outputB) || !File.Exists(outputB))
+                {
+                    failures++;
+                    log.AppendLine("  FAIL 批量处理没有产出两个输出文件");
+                }
+                else
+                {
+                    ImageLoadResult loadedA = imageService.LoadAsync(outputA).GetAwaiter().GetResult();
+                    ImageLoadResult loadedB = imageService.LoadAsync(outputB).GetAwaiter().GetResult();
+
+                    int topLeftA = CountBrightPixelsInQuadrant(loadedA.Bitmap, 0);
+                    int bottomRightA = CountBrightPixelsInQuadrant(loadedA.Bitmap, 3);
+                    int topLeftB = CountBrightPixelsInQuadrant(loadedB.Bitmap, 0);
+                    int bottomRightB = CountBrightPixelsInQuadrant(loadedB.Bitmap, 3);
+
+                    if (topLeftA <= 0 || bottomRightA > 0)
+                    {
+                        failures++;
+                        log.AppendLine(string.Format(
+                            "  FAIL A 应当按自己的参数把水印放在左上（左上 {0} 像素 / 右下 {1} 像素）",
+                            topLeftA, bottomRightA));
+                    }
+                    else if (bottomRightB <= 0 || topLeftB > 0)
+                    {
+                        failures++;
+                        log.AppendLine(string.Format(
+                            "  FAIL B 应当跟随公共设置把水印放在右下（左上 {0} 像素 / 右下 {1} 像素）",
+                            topLeftB, bottomRightB));
+                    }
+                    else if (topLeftA != topLeftB && bottomRightA == 0 && bottomRightB > 0)
+                    {
+                        log.AppendLine(string.Format(
+                            "  OK   实际输出各按各的参数（A 左上 {0} px、右下 {1} px；B 左上 {2} px、右下 {3} px）",
+                            topLeftA, bottomRightA, topLeftB, bottomRightB));
+                    }
+                    else
+                    {
+                        log.AppendLine(string.Format(
+                            "  OK   实际输出各按各的参数（A 左上 {0} px / 右下 {1} px；B 左上 {2} px / 右下 {3} px）",
+                            topLeftA, bottomRightA, topLeftB, bottomRightB));
+                    }
+                }
+
+                // ---- 恢复为公共设置 ----
+                viewModel.SelectedBatchItem = itemA;
+                viewModel.ResetBatchItemParamsCommand.Execute(null);
+
+                checks++;
+                if (itemA.HasCustomSteps)
+                {
+                    failures++;
+                    log.AppendLine("  FAIL 恢复为公共设置后不该还有独立参数");
+                }
+                else if (viewModel.SelectedBatchStep == null
+                         || !ReferenceEquals(viewModel.SelectedBatchStep.Step, sharedStepReference))
+                {
+                    failures++;
+                    log.AppendLine("  FAIL 恢复后面板应当切回公共设置的步骤");
+                }
+                else
+                {
+                    log.AppendLine("  OK   恢复为公共设置后，面板与这张图都回到公共流水线");
+                }
+
+                // ---- 把某张图的参数推回公共设置（并确认是深拷贝）----
+                viewModel.CustomizeBatchItemParamsCommand.Execute(null);
+                viewModel.BatchWatermarkText = "推回公共的文字";
+                viewModel.PushBatchItemParamsToSharedCommand.Execute(null);
+
+                // 先把 A 自己那一步抓住，再推回 —— 推回之后公共列表里是一个**新的克隆对象**，
+                // 之前抓的 sharedStepReference 已经不在列表里了，拿它去断言是自欺欺人。
+                BatchWatermarkStep ownBeforePush = (BatchWatermarkStep)itemA.Steps[0].Step;
+
+                viewModel.PushBatchItemParamsToSharedCommand.Execute(null);
+
+                // 取消选中，这样 BatchSteps 才指向公共列表
+                viewModel.SelectedBatchItem = null;
+                BatchWatermarkStep pushed = (BatchWatermarkStep)viewModel.BatchSteps[0].Step;
+
+                checks++;
+                if (!string.Equals(pushed.Text, "推回公共的文字", StringComparison.Ordinal))
+                {
+                    failures++;
+                    log.AppendLine(string.Format("  FAIL 推回公共设置没生效（公共是「{0}」）", pushed.Text));
+                }
+                else if (ReferenceEquals(pushed, ownBeforePush))
+                {
+                    failures++;
+                    log.AppendLine("  FAIL 推回公共设置时应当复制，不能把同一个对象塞进公共列表（之后会互相影响）");
+                }
+                else
+                {
+                    log.AppendLine("  OK   参数推回公共设置成功，且是深拷贝（A 的自有参数不受后续影响）");
+                }
+
+                // 推回之后再改公共，A 的自有参数不能跟着动
+                checks++;
+                viewModel.BatchWatermarkText = "公共第三版";
+                viewModel.SelectedBatchItem = itemA;
+
+                if (!string.Equals(ownBeforePush.Text, "推回公共的文字", StringComparison.Ordinal))
+                {
+                    failures++;
+                    log.AppendLine("  FAIL 推回之后改公共设置又影响到了 A 的自有参数");
+                }
+                else
+                {
+                    log.AppendLine("  OK   推回是单向的：之后再改公共设置不会回头改动 A 的自有参数");
+                }
+
+                // ---- 删掉正在编辑的图：不能崩，面板要切回公共 ----
+                checks++;
+                viewModel.RemoveBatchQueueItemCommand.Execute(itemA);
+
+                if (viewModel.SelectedBatchItem != null
+                    && !viewModel.BatchQueue.Contains(viewModel.SelectedBatchItem))
+                {
+                    failures++;
+                    log.AppendLine("  FAIL 删掉正在编辑的图后，选中项指向了已不在队列里的对象");
+                }
+                else if (viewModel.IsEditingItemParameters)
+                {
+                    failures++;
+                    log.AppendLine("  FAIL 删掉正在编辑的图后面板应当切回公共设置");
+                }
+                else if (!ReferenceEquals(viewModel.BatchSteps, null) && viewModel.BatchSteps.Count != 1)
+                {
+                    failures++;
+                    log.AppendLine("  FAIL 删图不该影响公共流水线");
+                }
+                else
+                {
+                    log.AppendLine("  OK   删掉正在编辑的图后不崩，面板自动切回公共设置，公共流水线未受影响");
+                }
+            }
+            catch (Exception ex)
+            {
+                failures++;
+                log.AppendLine("  FAIL 每张图独立参数测试异常: " + ex.GetType().Name + " " + ex.Message);
+
+                string stack = ex.StackTrace;
+
+                if (!string.IsNullOrEmpty(stack))
+                {
+                    string[] frames = stack.Split('\n');
+                    log.AppendLine("       位于 " + frames[0].Trim());
+
+                    if (frames.Length > 1)
+                    {
+                        log.AppendLine("       " + frames[1].Trim());
+                    }
+                }
+            }
+
+            log.AppendLine();
+        }
+
+        /// <summary>存一张纯色 PNG（独立参数测试的底图，白水印落在哪边一眼能判）。</summary>
+        private static void SaveSolidImage(string path, int width, int height, byte r, byte g, byte b)
+        {
+            PixelBuffer buffer = CreateSolidBuffer(width, height, r, g, b);
+            BitmapSource bitmap = PixelBuffer.ToBitmap(buffer, 96.0, 96.0);
+
+            PngBitmapEncoder encoder = new PngBitmapEncoder();
+            encoder.Frames.Add(BitmapFrame.Create(bitmap, null, null, null));
+
+            using (System.IO.FileStream stream = new System.IO.FileStream(
+                path, System.IO.FileMode.Create, System.IO.FileAccess.Write, System.IO.FileShare.None))
+            {
+                encoder.Save(stream);
+            }
+        }
+
+        /// <summary>统计某个象限里的亮像素个数（0=左上，1=右上，2=左下，3=右下）。</summary>
+        private static int CountBrightPixelsInQuadrant(BitmapSource bitmap, int quadrant)
+        {
+            if (bitmap == null)
+            {
+                return 0;
+            }
+
+            PixelBuffer buffer = PixelBuffer.FromBitmap(bitmap);
+            byte[] pixels = buffer.GetPixels();
+
+            int halfWidth = buffer.Width / 2;
+            int halfHeight = buffer.Height / 2;
+            int left = (quadrant == 1 || quadrant == 3) ? halfWidth : 0;
+            int top = (quadrant == 2 || quadrant == 3) ? halfHeight : 0;
+            int count = 0;
+
+            for (int y = top; y < top + halfHeight && y < buffer.Height; y++)
+            {
+                for (int x = left; x < left + halfWidth && x < buffer.Width; x++)
+                {
+                    int index = (y * buffer.Width + x) * 4;
+
+                    if (pixels[index] >= 200 && pixels[index + 1] >= 200 && pixels[index + 2] >= 200)
+                    {
+                        count++;
+                    }
+                }
+            }
+
+            return count;
         }
 
         /// <summary>点 (x, y) 是否落在以 (x1,y1)-(x2,y2) 为轴的胶囊带内（用于校验涂抹范围）。</summary>
