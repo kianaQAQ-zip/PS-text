@@ -693,4 +693,5 @@
   <sys:String x:Key="Batch_ResetItemDone">“{0}” now follows the shared settings</sys:String>
   <sys:String x:Key="Batch_PushedToShared">These settings are now the shared settings</sys:String>
   <sys:String x:Key="Batch_PushToSharedConfirm">Replace the shared settings with this image's? Every image without its own settings will change too.</sys:String>
+  <sys:String x:Key="Tab_Moved">Tab order updated: {0}</sys:String>
 </ResourceDictionary>

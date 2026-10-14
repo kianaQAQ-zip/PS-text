@@ -79,6 +79,12 @@ namespace PSText.ViewModels
         /// <summary>关闭当前标签页。</summary>
         public ICommand CloseCurrentTabCommand { get; private set; }
 
+        /// <summary>把当前标签往左移一格（Ctrl+Shift+PageUp）。</summary>
+        public ICommand MoveTabLeftCommand { get; private set; }
+
+        /// <summary>把当前标签往右移一格（Ctrl+Shift+PageDown）。</summary>
+        public ICommand MoveTabRightCommand { get; private set; }
+
         private void InitializeTabCommands()
         {
             OpenInNewTabCommand = CreateAsyncCommand(OpenImageAsync, () => !IsBusy);
@@ -94,6 +100,14 @@ namespace PSText.ViewModels
             CloseCurrentTabCommand = new RelayCommand(
                 () => RunCloseTab(_activeSession),
                 () => !IsBusy);
+
+            MoveTabLeftCommand = new RelayCommand(
+                () => MoveActiveTab(-1),
+                () => CanMoveActiveTab(-1));
+
+            MoveTabRightCommand = new RelayCommand(
+                () => MoveActiveTab(1),
+                () => CanMoveActiveTab(1));
         }
 
         #endregion
@@ -101,6 +115,63 @@ namespace PSText.ViewModels
         #region 会话生命周期
 
         /// <summary>建立一个会话，并把它的通知接到界面上。</summary>
+        /// <summary>
+        /// 把第 <paramref name="fromIndex"/> 条会话移动到最终的第 <paramref name="toIndex"/> 位。
+        ///
+        /// 刻意**不改 ActiveSession** —— 拖动排序只调整顺序，不该顺手把当前文档切走。
+        /// （标签页那边的既有纪律是"切换标签必须整体刷新"，而这里根本没有切换，
+        ///   所以除了集合本身的变更通知之外不需要刷新任何东西。）
+        /// </summary>
+        public void MoveSession(int fromIndex, int toIndex)
+        {
+            int count = Sessions.Count;
+
+            if (fromIndex < 0 || fromIndex >= count)
+            {
+                return;
+            }
+
+            if (toIndex < 0)
+            {
+                toIndex = 0;
+            }
+            else if (toIndex > count - 1)
+            {
+                toIndex = count - 1;
+            }
+
+            if (fromIndex == toIndex)
+            {
+                return;
+            }
+
+            Sessions.Move(fromIndex, toIndex);
+            RelayCommand.RaiseCanExecuteChanged();
+        }
+
+        /// <summary>把当前标签左右挪一格。越界时不动（按钮也会相应置灰）。</summary>
+        private void MoveActiveTab(int delta)
+        {
+            int index = Sessions.IndexOf(ActiveSession);
+            int target = index + delta;
+
+            if (index < 0 || target < 0 || target >= Sessions.Count)
+            {
+                return;
+            }
+
+            MoveSession(index, target);
+            StatusMessage = Loc.T("Tab_Moved", ActiveSession.TabTitle);
+        }
+
+        private bool CanMoveActiveTab(int delta)
+        {
+            int index = Sessions.IndexOf(ActiveSession);
+            int target = index + delta;
+
+            return index >= 0 && target >= 0 && target < Sessions.Count;
+        }
+
         private DocumentSession CreateSession(ImageDocument document)
         {
             DocumentSession session = new DocumentSession();

@@ -222,7 +222,9 @@
             Visibility="{Binding HasDocument, Converter={StaticResource BoolToVisibility}}">
       <ScrollViewer HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Disabled"
                     Padding="4,3">
-        <ItemsControl ItemsSource="{Binding Sessions}">
+        <!-- 标签栏：按住标签横向拖动即可调整顺序（拖出标签栏则取消） -->
+        <ItemsControl ItemsSource="{Binding Sessions}"
+                      behaviors:TabReorder.IsEnabled="True">
           <ItemsControl.ItemsPanel>
             <ItemsPanelTemplate>
               <StackPanel Orientation="Horizontal" />

@@ -143,6 +143,29 @@ namespace PSText.Views
             {
                 switch (e.Key)
                 {
+                    // Ctrl+Shift+PageUp / PageDown 把当前标签左右挪一格。
+                    // 加上键盘这条不只是为了无障碍：拖动本身没法在无头自检里跑，
+                    // 而移动语义（下标换算、边界钳制）走这个入口就能被自动覆盖。
+                    case Key.PageUp:
+                        if (!shift)
+                        {
+                            break;
+                        }
+
+                        ExecuteCommand(viewModel.MoveTabLeftCommand);
+                        e.Handled = true;
+                        return;
+
+                    case Key.PageDown:
+                        if (!shift)
+                        {
+                            break;
+                        }
+
+                        ExecuteCommand(viewModel.MoveTabRightCommand);
+                        e.Handled = true;
+                        return;
+
                     case Key.Z:
                         viewModel.Undo();
                         e.Handled = true;

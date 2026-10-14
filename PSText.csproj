@@ -198,6 +198,7 @@
     <Compile Include="Services\ILocalizationService.cs" />
     <Compile Include="Services\LocalizationService.cs" />
     <Compile Include="Infrastructure\Localization\TranslateExtension.cs" />
+    <Compile Include="Infrastructure\Behaviors\TabReorderBehavior.cs" />
     <Compile Include="Services\DotNetRuntimeInfo.cs" />
     <Compile Include="Services\FileAssociationService.cs" />
     <Compile Include="Services\CommandLineOptions.cs" />

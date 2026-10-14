@@ -25,7 +25,7 @@
 - WPF + .NET Framework 4.8，`AnyCPU + Prefer32Bit=true`（32 位运行）。
 - **零第三方 NuGet**——引入任何依赖前必须先向用户确认。
 - 构建产物在 `build/bin`（`Directory.Build.props` 定制），`.csproj` 为传统显式包含（**新文件必须手工加 `<Compile Include>`**）。
-- 自检在 `SelfTest.cs`（约 12,400 行 / **358 断言**），`PSText.exe --selftest` 运行。
+- 自检在 `SelfTest.cs`（约 12,800 行 / **366 断言**），`PSText.exe --selftest` 运行。
   ⚠️ 其中**文件关联的写入流程约 18 项在本机是 Skip 的**（本机工具层拦下可执行文件写注册表，
   已核实非代码问题）。自检先探测 HKCU 可写性，不可写就明确 Skip，避免恒红。
 - MVVM：VM 只依赖 `IImageService / IDialogService / IDispatcherService / IPrintService`，**不得引用 WPF 控件类型**。
@@ -219,3 +219,17 @@
   **凡"快照/执行"路径一律显式点名 `_sharedXxx`，不要复用转发属性。**
 - 这类"状态串味"要用**输出像素**去断言（比对象引用强得多）：端到端跑一遍，
   数输出文件里水印落在哪个象限。
+
+## 标签拖动排序（2026-10-14 完成）
+- `Infrastructure/Behaviors/TabReorderBehavior.cs`（附加属性，挂在标签栏 ItemsControl 上）。
+  拖动只算**目标下标**，移动交给 `MoveSession` ⇒ 移动语义可被无头自检覆盖。
+- ⚠️ **两个必须做的事，否则这功能是负优化**：
+  ① **位移阈值 4px** —— 标签本身是按钮，按下即切标签；按下即拖动会让"点一下切标签"失效。
+  ② **越过阈值时抢走按钮的鼠标捕获**（`Mouse.Capture(itemsControl)`）—— 否则拖完松手会顺手激活标签。
+- ⚠️ **插入位置换算不是 `Move` 的下标**：`Move` 是"先摘出来再插进去"，往前拖要减 1。
+  已做成纯函数 `TabReorder.ResolveTargetIndex`，自检打满边界。
+  算错的表现是"往右拖一格只动了半格"这种别扭手感，极难一眼看出。
+- `MoveSession` **不碰 `ActiveSession`**；`IsActiveTab` 存在会话对象上（不按位置算），
+  因此移动后标记跟着对象走、无需刷新。
+- 插入指示线用 `Adorner`（不往可视树塞矩形）；坐标用 `TranslatePoint` 折到标签栏坐标系，横向滚动自动算对。
+- 写自检时留过一条 `ReferenceEquals(x, x)` 恒真断言，已删。**空断言比没有断言更糟**。

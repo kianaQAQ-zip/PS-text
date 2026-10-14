@@ -11,6 +11,7 @@ using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using System.Windows.Threading;
 using PSText.Infrastructure.History;
+using PSText.Infrastructure.Behaviors;
 using PSText.Infrastructure.Imaging;
 using PSText.Models;
 using PSText.Services;
@@ -127,6 +128,7 @@ namespace PSText
                 CheckMosaicAnnotation(imageService, pngPath, ref checks, ref failures, log);
                 CheckAnnotationResize(imageService, pngPath, ref checks, ref failures, log);
                 CheckDocumentTabs(imageService, pngPath, jpgPath, ref checks, ref failures, log);
+                CheckTabReordering(imageService, pngPath, jpgPath, ref checks, ref failures, log);
                 log.AppendLine();
             }
             catch (Exception ex)
@@ -10733,6 +10735,233 @@ namespace PSText
             }
 
             return count;
+        }
+
+        /// <summary>
+        /// 校验标签拖动排序。
+        ///
+        /// 拖动本身没法在无头环境里跑（要真鼠标），所以把可验的部分都拎出来验：
+        ///   * **下标换算**（<c>ResolveTargetIndex</c>）：这是最容易错也最难看出来的地方 ——
+        ///     `Move` 是"先摘出来再插进去"，往前拖时源项自己占了一个位置，要减 1。
+        ///     算错的表现是"往右拖一格只动了半格"这种别扭手感。
+        ///   * **移动语义**：顺序变了、但**当前文档没变**（拖动只排序，不该顺手切标签）。
+        ///   * **激活标记跟着对象走**：`IsActiveTab` 存在会话上而不是按位置算，
+        ///     所以移动之后仍然只有一个是激活的，而且还是原来那一个。
+        /// </summary>
+        private static void CheckTabReordering(
+            IImageService imageService,
+            string pngPath,
+            string jpgPath,
+            ref int checks,
+            ref int failures,
+            StringBuilder log)
+        {
+            log.AppendLine("[42] 标签拖动排序");
+
+            try
+            {
+                // ---- 1) 下标换算（纯函数，逐条钉住）----
+                checks++;
+                int[][] cases =
+                {
+                    // from, slot, expected
+                    new[] { 0, 0, 0 },
+                    new[] { 0, 1, 0 },   // 插到"自己前面" = 不动
+                    new[] { 0, 2, 1 },   // 往后挪一格
+                    new[] { 0, 3, 2 },   // 三项时插到最后 = 移到最后
+                    new[] { 2, 0, 0 },   // 往前拖到最前
+                    new[] { 2, 1, 1 },
+                    new[] { 2, 2, 2 },   // 插到"自己前面" = 不动
+                    new[] { 2, 3, 2 },   // 插到"自己后面" = 不动
+                    new[] { 1, 1, 1 },
+                    new[] { 1, 2, 1 }
+                };
+
+                List<string> wrong = new List<string>();
+
+                for (int i = 0; i < cases.Length; i++)
+                {
+                    int actual = TabReorder.ResolveTargetIndex(cases[i][0], cases[i][1]);
+
+                    if (actual != cases[i][2])
+                    {
+                        wrong.Add(string.Format("({0},{1})→{2} 应为 {3}",
+                            cases[i][0], cases[i][1], actual, cases[i][2]));
+                    }
+                }
+
+                if (wrong.Count > 0)
+                {
+                    failures++;
+                    log.AppendLine("  FAIL 拖动目标下标换算不正确：" + string.Join("；", wrong.ToArray()));
+                }
+                else
+                {
+                    log.AppendLine("  OK   拖动目标下标换算正确（含「插到自己前后都不动」这些边界）");
+                }
+
+                checks++;
+                if (TabReorder.ResolveTargetIndex(-1, 0) != -1
+                    || TabReorder.ResolveTargetIndex(0, -1) != -1)
+                {
+                    failures++;
+                    log.AppendLine("  FAIL 非法下标应当返回 -1（让调用方放弃这次移动）");
+                }
+                else
+                {
+                    log.AppendLine("  OK   非法下标安全返回 -1");
+                }
+
+                // ---- 2) 真的移动：顺序变了，当前文档没变 ----
+                MainViewModel viewModel = new MainViewModel(
+                    imageService, new NullDialogService(), new ImmediateDispatcherService());
+
+                viewModel.LoadFromPathAsync(pngPath).GetAwaiter().GetResult();
+                WaitForIdle(viewModel);
+                DocumentSession first = viewModel.ActiveSession;
+
+                viewModel.LoadFromPathAsync(jpgPath).GetAwaiter().GetResult();
+                WaitForIdle(viewModel);
+                DocumentSession second = viewModel.ActiveSession;
+
+                viewModel.LoadFromPathAsync(pngPath).GetAwaiter().GetResult();
+                WaitForIdle(viewModel);
+                DocumentSession third = viewModel.ActiveSession;
+
+                checks++;
+                if (viewModel.Sessions.Count != 3)
+                {
+                    failures++;
+                    log.AppendLine(string.Format("  FAIL 准备阶段应有 3 个标签，实际 {0}", viewModel.Sessions.Count));
+                }
+                else
+                {
+                    // 把第一个标签拖到最后
+                    viewModel.MoveSession(0, 2);
+
+                    bool orderOk = ReferenceEquals(viewModel.Sessions[0], second)
+                                   && ReferenceEquals(viewModel.Sessions[1], third)
+                                   && ReferenceEquals(viewModel.Sessions[2], first);
+
+                    if (!orderOk)
+                    {
+                        failures++;
+                        log.AppendLine("  FAIL 移动后顺序不对（应变成 2 / 3 / 1）");
+                    }
+                    else if (!ReferenceEquals(viewModel.ActiveSession, third))
+                    {
+                        failures++;
+                        log.AppendLine("  FAIL 拖动排序不该改变当前文档");
+                    }
+                    else
+                    {
+                        log.AppendLine("  OK   移动生效（第 1 个标签移到末尾）且当前文档没变");
+                    }
+                }
+
+                // ---- 3) 激活标记跟着对象走 ----
+                checks++;
+                int activeFlags = 0;
+
+                for (int i = 0; i < viewModel.Sessions.Count; i++)
+                {
+                    if (viewModel.Sessions[i].IsActiveTab)
+                    {
+                        activeFlags++;
+                    }
+                }
+
+                if (activeFlags != 1 || !viewModel.ActiveSession.IsActiveTab)
+                {
+                    failures++;
+                    log.AppendLine(string.Format(
+                        "  FAIL 移动后应当仍然只有一个激活标签（实际 {0} 个）", activeFlags));
+                }
+                else
+                {
+                    log.AppendLine("  OK   移动后仍只有一个激活标签，且是同一个会话（标记存在对象上，不按位置算）");
+                }
+
+                // ---- 4) 键盘移动 ----
+                checks++;
+                int indexBefore = viewModel.Sessions.IndexOf(third);
+                bool canLeft = viewModel.MoveTabLeftCommand.CanExecute(null);
+                viewModel.MoveTabLeftCommand.Execute(null);
+
+                if (!canLeft || viewModel.Sessions.IndexOf(third) != indexBefore - 1)
+                {
+                    failures++;
+                    log.AppendLine("  FAIL Ctrl+Shift+PageUp 应当把当前标签左移一格");
+                }
+                else if (!ReferenceEquals(viewModel.ActiveSession, third))
+                {
+                    failures++;
+                    log.AppendLine("  FAIL 键盘移动不该改变当前文档");
+                }
+                else
+                {
+                    log.AppendLine("  OK   键盘左移一格生效，当前文档仍是同一个标签");
+                }
+
+                checks++;
+                viewModel.MoveTabRightCommand.Execute(null);
+
+                if (viewModel.Sessions.IndexOf(third) != indexBefore)
+                {
+                    failures++;
+                    log.AppendLine(string.Format(
+                        "  FAIL 右移回去后索引不对（期望 {0}，实际 {1}）",
+                        indexBefore, viewModel.Sessions.IndexOf(third)));
+                }
+                else
+                {
+                    log.AppendLine("  OK   右移一格回到原处（移动是可逆的）");
+                }
+
+                // ---- 5) 边界：移到头就不动了 ----
+                checks++;
+                viewModel.ActivateTabCommand.Execute(first);
+                viewModel.MoveSession(viewModel.Sessions.IndexOf(first), 0);
+                viewModel.MoveTabLeftCommand.Execute(null);
+
+                if (viewModel.Sessions.IndexOf(first) != 0)
+                {
+                    failures++;
+                    log.AppendLine("  FAIL 已经在最左边时不该再移动");
+                }
+                else if (viewModel.MoveTabLeftCommand.CanExecute(null))
+                {
+                    failures++;
+                    log.AppendLine("  FAIL 已经在最左边时左移命令应当不可用");
+                }
+                else
+                {
+                    log.AppendLine("  OK   已到边界时不动，且命令置灰");
+                }
+
+                // ---- 6) 越界入参不抛异常 ----
+                checks++;
+                viewModel.MoveSession(99, 0);
+                viewModel.MoveSession(0, 99);
+                viewModel.MoveSession(-5, -5);
+                viewModel.MoveSession(0, 0);
+
+                log.AppendLine("  OK   越界下标与「原地移动」都被安全忽略（不抛异常）");
+            }
+            catch (Exception ex)
+            {
+                failures++;
+                log.AppendLine("  FAIL 标签拖动排序测试异常: " + ex.GetType().Name + " " + ex.Message);
+
+                string stack = ex.StackTrace;
+
+                if (!string.IsNullOrEmpty(stack))
+                {
+                    log.AppendLine("       位于 " + stack.Split('\n')[0].Trim());
+                }
+            }
+
+            log.AppendLine();
         }
 
         /// <summary>点 (x, y) 是否落在以 (x1,y1)-(x2,y2) 为轴的胶囊带内（用于校验涂抹范围）。</summary>
